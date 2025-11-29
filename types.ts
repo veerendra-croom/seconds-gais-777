@@ -18,20 +18,25 @@ export interface Item {
   image: string;
   category: Category;
   type: 'SALE' | 'RENT' | 'SHARE' | 'SWAP' | 'SERVICE';
+  sellerId?: string; // Link to profile
   sellerName: string;
   college: string;
   rating: number;
   description: string;
   verified: boolean;
+  status: 'ACTIVE' | 'SOLD' | 'DRAFT' | 'ARCHIVED';
 }
 
 export interface UserProfile {
+  id: string;
+  email: string;
   name: string;
   college: string;
   verified: boolean;
   savings: number; // Sustainability metric
   earnings: number;
   avatar: string;
+  verificationStatus: 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 }
 
 export interface NavItem {

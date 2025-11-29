@@ -1,12 +1,15 @@
 import { Item, Category, UserProfile } from './types';
 
 export const MOCK_USER: UserProfile = {
+  id: 'user-123',
+  email: 'alex.j@stanford.edu',
   name: "Alex Johnson",
   college: "Stanford University",
   verified: true,
   savings: 450,
   earnings: 1200,
-  avatar: "https://picsum.photos/seed/user123/100/100"
+  avatar: "https://picsum.photos/seed/user123/100/100",
+  verificationStatus: 'VERIFIED'
 };
 
 export const MOCK_ITEMS: Item[] = [
@@ -22,7 +25,8 @@ export const MOCK_ITEMS: Item[] = [
     college: 'Stanford',
     rating: 4.8,
     description: 'Used for one semester. No highlighting.',
-    verified: true
+    verified: true,
+    status: 'ACTIVE'
   },
   {
     id: '2',
@@ -36,7 +40,8 @@ export const MOCK_ITEMS: Item[] = [
     college: 'Stanford',
     rating: 4.5,
     description: 'Available for rent during midterms.',
-    verified: true
+    verified: true,
+    status: 'ACTIVE'
   },
   {
     id: '3',
@@ -49,7 +54,8 @@ export const MOCK_ITEMS: Item[] = [
     college: 'Stanford',
     rating: 5.0,
     description: 'CS Major offering intro to Python help.',
-    verified: true
+    verified: true,
+    status: 'ACTIVE'
   },
   {
     id: '4',
@@ -62,7 +68,8 @@ export const MOCK_ITEMS: Item[] = [
     college: 'Stanford',
     rating: 4.2,
     description: 'Moving out sale. Must pick up.',
-    verified: true
+    verified: true,
+    status: 'ACTIVE'
   },
   {
     id: '5',
@@ -75,7 +82,8 @@ export const MOCK_ITEMS: Item[] = [
     college: 'Stanford',
     rating: 4.9,
     description: 'Looking to swap for a mechanical keyboard.',
-    verified: true
+    verified: true,
+    status: 'ACTIVE'
   }
 ];
 
