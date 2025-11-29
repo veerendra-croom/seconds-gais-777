@@ -1,6 +1,6 @@
 import React from 'react';
 import { Item } from '../types';
-import { MapPin, Star, ShieldCheck, Heart } from 'lucide-react';
+import { MapPin, Star, ShieldCheck, Heart, Layers } from 'lucide-react';
 
 interface ItemCardProps {
   item: Item;
@@ -11,6 +11,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({ item, onClick }) => {
   const isRent = item.type === 'RENT';
   const isSwap = item.type === 'SWAP';
   const isService = item.type === 'SERVICE';
+  const hasMultipleImages = item.images && item.images.length > 1;
 
   return (
     <div 
@@ -26,17 +27,24 @@ export const ItemCard: React.FC<ItemCardProps> = ({ item, onClick }) => {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
         
-        <div className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-full text-[10px] font-bold text-slate-800 shadow-sm uppercase tracking-wide">
+        <div className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-full text-[10px] font-bold text-slate-800 shadow-sm uppercase tracking-wide z-10">
           {item.type}
         </div>
         
+        {hasMultipleImages && (
+          <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-sm text-white px-1.5 py-1 rounded-md shadow-sm z-10 flex items-center gap-1">
+             <Layers size={12} />
+             <span className="text-[10px] font-medium">{item.images.length}</span>
+          </div>
+        )}
+
         {item.verified && (
-          <div className="absolute bottom-2 left-2 bg-green-500/90 backdrop-blur-sm text-white p-1 rounded-full shadow-sm" title="Verified Student">
+          <div className="absolute bottom-2 left-2 bg-green-500/90 backdrop-blur-sm text-white p-1 rounded-full shadow-sm z-10" title="Verified Student">
              <ShieldCheck size={14} />
           </div>
         )}
 
-        <button className="absolute bottom-2 right-2 p-1.5 bg-white/90 rounded-full text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all scale-90 group-hover:scale-100">
+        <button className="absolute bottom-2 right-2 p-1.5 bg-white/90 rounded-full text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all scale-90 group-hover:scale-100 z-10">
            <Heart size={16} />
         </button>
       </div>

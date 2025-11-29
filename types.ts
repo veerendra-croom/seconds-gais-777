@@ -15,7 +15,8 @@ export interface Item {
   title: string;
   price: number;
   originalPrice?: number;
-  image: string;
+  image: string; // Primary thumbnail
+  images: string[]; // Gallery
   category: Category;
   type: 'SALE' | 'RENT' | 'SHARE' | 'SWAP' | 'SERVICE';
   sellerId?: string; // Link to profile

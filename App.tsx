@@ -62,8 +62,6 @@ const App: React.FC = () => {
         }
       } else {
         // Profile might not exist yet if triggers failed or just registered
-        // In a real app, we might redirect to a "Complete Profile" page
-        // For now, assume auth is enough to show verification
         setAppState('VERIFICATION');
       }
     } catch (error) {
@@ -75,7 +73,6 @@ const App: React.FC = () => {
   const handleVerificationComplete = () => {
     localStorage.setItem('skipped_verification', 'true');
     setAppState('APP');
-    // Optionally refresh profile here
     if (session?.user?.id) handleUserLoaded(session.user.id);
   };
 
@@ -88,6 +85,14 @@ const App: React.FC = () => {
     setEditingItem(null); // Clear editing state
     setCurrentView('HOME');
   };
+
+  const handleViewChange = (view: ModuleType) => {
+    // If navigating away from SELL (e.g. from nav bar), clear editing state
+    if (currentView === 'SELL' && view !== 'SELL') {
+      setEditingItem(null);
+    }
+    setCurrentView(view);
+  }
 
   const renderView = () => {
     if (!userProfile) return null;
@@ -126,7 +131,7 @@ const App: React.FC = () => {
   }
 
   if (appState === 'AUTH') {
-    return <AuthView onSuccess={() => {}} />; // Session listener handles transition
+    return <AuthView onSuccess={() => {}} />; 
   }
 
   if (appState === 'VERIFICATION') {
@@ -135,13 +140,7 @@ const App: React.FC = () => {
 
   return (
     <div className="bg-slate-50 min-h-screen flex w-full overflow-hidden">
-      <Navigation currentView={currentView} setView={(view) => {
-        // If navigating away from SELL, clear editing item
-        if (currentView === 'SELL' && view !== 'SELL') {
-          setEditingItem(null);
-        }
-        setCurrentView(view);
-      }} />
+      <Navigation currentView={currentView} setView={handleViewChange} />
       <main className="flex-1 w-full md:ml-64 h-screen overflow-y-auto overflow-x-hidden transition-all duration-300 relative">
         {renderView()}
       </main>

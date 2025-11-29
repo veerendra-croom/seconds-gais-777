@@ -1,5 +1,20 @@
 import { supabase } from './supabaseClient';
-import { Item, UserProfile, Category, ModuleType } from '../types';
+import { Item, UserProfile, Category } from '../types';
+
+// Helper to parse image column which might be a single URL string or a JSON array string
+const parseImages = (imgStr: string | null): string[] => {
+  if (!imgStr) return [];
+  try {
+    // Check if it looks like a JSON array
+    if (imgStr.trim().startsWith('[')) {
+      const parsed = JSON.parse(imgStr);
+      return Array.isArray(parsed) ? parsed : [imgStr];
+    }
+    return [imgStr];
+  } catch (e) {
+    return [imgStr];
+  }
+};
 
 export const api = {
   /**
@@ -66,7 +81,6 @@ export const api = {
       .eq('status', 'ACTIVE'); // Only show active items
 
     // Map frontend module type to DB item type if necessary
-    // Logic: BUY -> SALE, RENT -> RENT, etc.
     let dbType = type;
     if (type === 'BUY') dbType = 'SALE';
     if (type === 'EARN') dbType = 'SERVICE';
@@ -87,22 +101,26 @@ export const api = {
       return [];
     }
 
-    return data.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      price: item.price,
-      originalPrice: item.original_price,
-      image: item.image || 'https://via.placeholder.com/300?text=No+Image',
-      category: item.category as Category,
-      type: item.type,
-      sellerId: item.seller_id,
-      sellerName: item.profiles?.full_name || 'Unknown',
-      college: item.profiles?.college || item.college || 'Unknown',
-      verified: item.profiles?.verified || false,
-      rating: item.rating || 5.0,
-      description: item.description,
-      status: item.status
-    }));
+    return data.map((item: any) => {
+      const images = parseImages(item.image);
+      return {
+        id: item.id,
+        title: item.title,
+        price: item.price,
+        originalPrice: item.original_price,
+        image: images[0] || 'https://via.placeholder.com/300?text=No+Image',
+        images: images,
+        category: item.category as Category,
+        type: item.type,
+        sellerId: item.seller_id,
+        sellerName: item.profiles?.full_name || 'Unknown',
+        college: item.profiles?.college || item.college || 'Unknown',
+        verified: item.profiles?.verified || false,
+        rating: item.rating || 5.0,
+        description: item.description,
+        status: item.status
+      };
+    });
   },
 
   /**
@@ -120,23 +138,26 @@ export const api = {
       return [];
     }
 
-    // Since we are the owner, we don't need to join profiles for sellerName
-    return data.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      price: item.price,
-      originalPrice: item.original_price,
-      image: item.image,
-      category: item.category as Category,
-      type: item.type,
-      sellerId: item.seller_id,
-      sellerName: 'Me', 
-      college: item.college,
-      rating: item.rating,
-      description: item.description,
-      verified: true,
-      status: item.status
-    }));
+    return data.map((item: any) => {
+      const images = parseImages(item.image);
+      return {
+        id: item.id,
+        title: item.title,
+        price: item.price,
+        originalPrice: item.original_price,
+        image: images[0] || 'https://via.placeholder.com/300?text=No+Image',
+        images: images,
+        category: item.category as Category,
+        type: item.type,
+        sellerId: item.seller_id,
+        sellerName: 'Me', 
+        college: item.college,
+        rating: item.rating,
+        description: item.description,
+        verified: true,
+        status: item.status
+      };
+    });
   },
 
   /**
@@ -150,27 +171,31 @@ export const api = {
         profiles:seller_id (full_name, college, verified)
       `)
       .eq('status', 'ACTIVE')
-      .order('created_at', { ascending: false }) // Simulating trending by "newest"
+      .order('created_at', { ascending: false })
       .limit(4);
 
     if (error) return [];
 
-    return data.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      price: item.price,
-      originalPrice: item.original_price,
-      image: item.image,
-      category: item.category as Category,
-      type: item.type,
-      sellerId: item.seller_id,
-      sellerName: item.profiles?.full_name || 'Unknown User',
-      college: item.college,
-      verified: item.profiles?.verified || false,
-      rating: item.rating,
-      description: item.description,
-      status: item.status
-    }));
+    return data.map((item: any) => {
+      const images = parseImages(item.image);
+      return {
+        id: item.id,
+        title: item.title,
+        price: item.price,
+        originalPrice: item.original_price,
+        image: images[0] || 'https://via.placeholder.com/300?text=No+Image',
+        images: images,
+        category: item.category as Category,
+        type: item.type,
+        sellerId: item.seller_id,
+        sellerName: item.profiles?.full_name || 'Unknown User',
+        college: item.college,
+        verified: item.profiles?.verified || false,
+        rating: item.rating,
+        description: item.description,
+        status: item.status
+      };
+    });
   },
 
   /**
@@ -196,8 +221,13 @@ export const api = {
 
   /**
    * Create new Item listing
+   * Handles saving multiple images by serializing array to JSON string
    */
-  createItem: async (item: Omit<Item, 'id' | 'sellerName' | 'verified' | 'rating' | 'college' | 'status'> & { status?: string }, userId: string, college: string) => {
+  createItem: async (item: Omit<Item, 'id' | 'sellerName' | 'verified' | 'rating' | 'college' | 'status'> & { status?: string, images: string[] }, userId: string, college: string) => {
+    // Serialize images array to string for DB storage
+    // If only 1 image, we could just store string, but JSON array is more flexible for future
+    const imagePayload = item.images.length > 0 ? JSON.stringify(item.images) : null;
+
     const { data, error } = await supabase
       .from('items')
       .insert({
@@ -207,7 +237,7 @@ export const api = {
         original_price: item.originalPrice,
         category: item.category,
         type: item.type,
-        image: item.image,
+        image: imagePayload, // Store as JSON string
         seller_id: userId,
         college: college,
         status: item.status || 'ACTIVE'
@@ -222,17 +252,22 @@ export const api = {
   /**
    * Update existing item
    */
-  updateItem: async (itemId: string, updates: Partial<Item>) => {
-    // Convert camelCase to snake_case for DB if needed, but Supabase JS handles it if keys match DB columns usually.
-    // However, our TS types map directly except for snake_case columns.
+  updateItem: async (itemId: string, updates: Partial<Item> & { images?: string[] }) => {
     const dbUpdates: any = {};
     if (updates.title) dbUpdates.title = updates.title;
     if (updates.description) dbUpdates.description = updates.description;
-    if (updates.price) dbUpdates.price = updates.price;
+    if (updates.price !== undefined) dbUpdates.price = updates.price;
     if (updates.category) dbUpdates.category = updates.category;
     if (updates.type) dbUpdates.type = updates.type;
-    if (updates.image) dbUpdates.image = updates.image;
     if (updates.status) dbUpdates.status = updates.status;
+    
+    // Handle images update
+    if (updates.images) {
+      dbUpdates.image = JSON.stringify(updates.images);
+    } else if (updates.image) {
+      // Fallback if single image string is passed
+      dbUpdates.image = updates.image;
+    }
 
     const { data, error } = await supabase
       .from('items')

@@ -190,13 +190,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, onEditItem }) =>
                              <CheckCircle2 size={18} />
                            </button>
                          )}
-                         <button 
-                           onClick={() => onEditItem && onEditItem(item)}
-                           className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" 
-                           title="Edit"
-                         >
-                           <Edit2 size={18} />
-                         </button>
+                         {(activeTab === 'ACTIVE' || activeTab === 'DRAFT') && (
+                           <button 
+                             onClick={() => onEditItem && onEditItem(item)}
+                             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" 
+                             title="Edit"
+                           >
+                             <Edit2 size={18} />
+                           </button>
+                         )}
                          <button 
                            onClick={() => handleDelete(item.id)}
                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg" 
