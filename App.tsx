@@ -61,8 +61,12 @@ const App: React.FC = () => {
           setAppState('VERIFICATION');
         }
       } else {
-        // Profile might not exist yet if triggers failed or just registered
-        setAppState('VERIFICATION');
+        // Critical: User is authenticated but profile is missing in DB.
+        // This causes the [object Object] error to leave the user stuck.
+        // We MUST sign them out so they can register again or handle profile creation.
+        console.warn("User authenticated but no profile found. Signing out to reset state.");
+        await signOut();
+        setAppState('AUTH');
       }
     } catch (error) {
       console.error("Error loading user", error);

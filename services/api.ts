@@ -21,14 +21,19 @@ export const api = {
    * Fetch User Profile including verification status
    */
   getProfile: async (userId: string): Promise<UserProfile | null> => {
+    // Use maybeSingle() instead of single() to avoid throwing error if row is missing
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Error fetching profile:', JSON.stringify(error));
+      return null;
+    }
+
+    if (!data) {
       return null;
     }
 
