@@ -1,13 +1,16 @@
+
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
-import { Loader2, Mail, Lock, User, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Mail, Lock, User, ArrowRight, CheckCircle2, AlertCircle, Key, ChevronLeft } from 'lucide-react';
 import { api } from '../services/api';
 
 interface AuthViewProps {
   onSuccess: () => void;
+  onBack: () => void;
 }
 
-export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
+export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
+  const [role, setRole] = useState<'STUDENT' | 'ADMIN'>('STUDENT');
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,15 +20,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
     email: '',
     password: '',
     fullName: '',
-    college: ''
+    college: '',
+    adminCode: ''
   });
-
-  const validateEmail = (email: string) => {
-    // Basic validation, in production utilize a list of college domains
-    const eduRegex = /^[^\s@]+@[^\s@]+\.(edu|ac\.[a-z]{2}|edu\.[a-z]{2})$/i;
-    // For demo purposes, we also allow common domains but warn user
-    return eduRegex.test(email) || email.includes('student') || email.length > 5; 
-  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,18 +32,24 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
 
     try {
       if (isLogin) {
+        // --- LOGIN FLOW ---
         const { error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         });
         if (error) throw error;
+        // App.tsx will detect session change and load user
       } else {
-        // Register Logic
-        if (!validateEmail(formData.email)) {
-           throw new Error("Please use a valid college email (.edu) to register.");
-        }
+        // --- REGISTRATION FLOW ---
         
-        // 1. Sign Up Auth User
+        // 1. Validate Admin Code if Admin
+        if (role === 'ADMIN') {
+          if (!formData.adminCode) throw new Error("Admin Access Code is required.");
+          const isValid = await api.checkAdminCode(formData.adminCode);
+          if (!isValid) throw new Error("Invalid Admin Access Code.");
+        }
+
+        // 2. Sign Up Auth User
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
@@ -54,29 +57,34 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
             data: {
               full_name: formData.fullName,
               college: formData.college || 'University',
+              role: role 
             },
           },
         });
 
         if (authError) throw authError;
 
-        // 2. Create Profile Row
-        if (authData.user) {
+        // 3. Handle Session State
+        if (authData.user && !authData.session) {
+          // Email confirmation is required and pending
+          setMessage("Registration successful! Please check your email to verify your account.");
+          return; // Stop here, don't try to create profile yet (RLS will fail)
+        }
+
+        // 4. Create Profile Row (Only if session exists immediately, i.e., email confirm disabled)
+        if (authData.user && authData.session) {
           await api.createProfile({
              id: authData.user.id,
              email: formData.email,
              name: formData.fullName,
-             college: formData.college || 'University',
+             college: formData.college || (role === 'ADMIN' ? 'Seconds HQ' : 'University'),
+             role: role,
              avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(formData.fullName)}&background=random`
           });
+          onSuccess();
         }
-        
-        setMessage("Account created! Logging you in...");
-        // Auto login usually happens, but if email confirm is on, it waits.
-        // For this demo, we assume email confirm is off or auto-sign-in works.
       }
       
-      onSuccess();
     } catch (err: any) {
       setError(err.message || 'An error occurred');
     } finally {
@@ -84,37 +92,81 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
     }
   };
 
+  // If we have a success message (like "Check Email"), show that state
+  if (message) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8 text-center animate-fade-in">
+          <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Check your inbox</h2>
+          <p className="text-slate-500 mb-6">{message}</p>
+          <button 
+            onClick={() => { setMessage(null); setIsLogin(true); }}
+            className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all"
+          >
+            Back to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 relative">
+      <button 
+        onClick={onBack}
+        className="absolute top-6 left-6 p-2 bg-white rounded-full shadow-sm text-slate-500 hover:text-slate-900 transition-colors z-10"
+      >
+        <ChevronLeft size={24} />
+      </button>
+
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden animate-fade-in">
         {/* Header */}
-        <div className="bg-primary-600 px-8 py-10 text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary-500 to-primary-700 opacity-90"></div>
-          <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+        <div className="bg-slate-900 px-8 py-10 text-center relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-slate-800 to-slate-900 opacity-90"></div>
           
           <div className="relative z-10">
-            <div className="w-16 h-16 bg-white rounded-2xl mx-auto flex items-center justify-center shadow-lg mb-4 text-primary-600 text-3xl font-bold">
-              S
-            </div>
-            <h1 className="text-2xl font-bold text-white mb-2">Seconds</h1>
-            <p className="text-primary-100 text-sm">The Verified Campus Marketplace</p>
+            <h1 className="text-2xl font-bold text-white mb-2">Welcome Back</h1>
+            <p className="text-slate-300 text-sm">Sign in to continue to Seconds</p>
           </div>
         </div>
 
+        {/* Role Toggle */}
+        {!isLogin && (
+          <div className="px-8 pt-6">
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button 
+                onClick={() => setRole('STUDENT')}
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${role === 'STUDENT' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-400'}`}
+              >
+                Student
+              </button>
+              <button 
+                onClick={() => setRole('ADMIN')}
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${role === 'ADMIN' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+              >
+                Admin
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Form */}
-        <div className="p-8">
-          <div className="flex gap-4 mb-8 bg-slate-100 p-1 rounded-xl">
+        <div className="p-8 pt-6">
+          <div className="flex gap-4 mb-6">
             <button 
               onClick={() => { setIsLogin(true); setError(null); }}
-              className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all ${isLogin ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`text-lg font-bold pb-1 transition-all ${isLogin ? 'text-slate-900 border-b-2 border-primary-500' : 'text-slate-400 hover:text-slate-600'}`}
             >
               Log In
             </button>
             <button 
               onClick={() => { setIsLogin(false); setError(null); }}
-              className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all ${!isLogin ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`text-lg font-bold pb-1 transition-all ${!isLogin ? 'text-slate-900 border-b-2 border-primary-500' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              Sign Up
+              Register
             </button>
           </div>
 
@@ -125,54 +177,58 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
             </div>
           )}
 
-          {message && (
-            <div className="mb-6 p-3 bg-green-50 border border-green-100 rounded-xl flex items-start gap-2 text-green-700 text-sm">
-              <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-              <span>{message}</span>
-            </div>
-          )}
-
           <form onSubmit={handleAuth} className="space-y-4">
             {!isLogin && (
               <>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase ml-1">Full Name</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-3.5 text-slate-400" size={18} />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-400 uppercase ml-1">Full Name</label>
                     <input 
                       type="text" 
                       required
-                      placeholder="Jane Doe"
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all"
                       value={formData.fullName}
                       onChange={e => setFormData({...formData, fullName: e.target.value})}
                     />
                   </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-400 uppercase ml-1">College</label>
+                    <input 
+                      type="text"
+                      required 
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all"
+                      value={formData.college}
+                      onChange={e => setFormData({...formData, college: e.target.value})}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                   <label className="text-xs font-semibold text-slate-500 uppercase ml-1">College Name</label>
-                   <div className="relative">
-                      <input 
-                        type="text"
-                        required 
-                        placeholder="Stanford University"
-                        className="w-full pl-4 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all"
-                        value={formData.college}
-                        onChange={e => setFormData({...formData, college: e.target.value})}
-                      />
-                   </div>
-                </div>
+
+                {role === 'ADMIN' && (
+                  <div className="space-y-1.5 animate-fade-in">
+                    <label className="text-xs font-bold text-slate-900 uppercase ml-1 flex items-center gap-1">
+                      <Key size={12} /> Admin Code
+                    </label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="Enter secret code"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:bg-white outline-none transition-all font-mono"
+                      value={formData.adminCode}
+                      onChange={e => setFormData({...formData, adminCode: e.target.value})}
+                    />
+                  </div>
+                )}
               </>
             )}
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-500 uppercase ml-1">College Email</label>
+              <label className="text-xs font-bold text-slate-400 uppercase ml-1">Email {isLogin ? '' : '(Personal)'}</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-3.5 text-slate-400" size={18} />
                 <input 
                   type="email" 
                   required
-                  placeholder="jane@stanford.edu"
+                  placeholder="you@gmail.com"
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all"
                   value={formData.email}
                   onChange={e => setFormData({...formData, email: e.target.value})}
@@ -181,7 +237,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-500 uppercase ml-1">Password</label>
+              <label className="text-xs font-bold text-slate-400 uppercase ml-1">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3.5 text-slate-400" size={18} />
                 <input 
@@ -198,11 +254,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess }) => {
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full bg-slate-900 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-slate-200 hover:bg-slate-800 active:scale-95 transition-all flex items-center justify-center mt-6"
+              className={`w-full py-3.5 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center mt-6 text-white ${role === 'ADMIN' && !isLogin ? 'bg-slate-900 hover:bg-slate-800 shadow-slate-300' : 'bg-primary-600 hover:bg-primary-700 shadow-primary-200'}`}
             >
               {loading ? <Loader2 className="animate-spin" /> : (
                 <>
-                  {isLogin ? 'Sign In' : 'Create Account'}
+                  {isLogin ? 'Sign In' : `Register as ${role === 'ADMIN' ? 'Admin' : 'Student'}`}
                   <ArrowRight size={18} className="ml-2" />
                 </>
               )}

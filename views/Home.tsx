@@ -7,6 +7,7 @@ import { ItemCard } from '../components/ItemCard';
 interface HomeProps {
   user: UserProfile;
   onModuleSelect: (module: ModuleType) => void;
+  onItemClick?: (item: Item) => void;
 }
 
 const modules = [
@@ -19,7 +20,7 @@ const modules = [
   { id: 'REQUEST', label: 'Request', icon: HandHeart, color: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-200' },
 ];
 
-export const Home: React.FC<HomeProps> = ({ user, onModuleSelect }) => {
+export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick }) => {
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -177,7 +178,7 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect }) => {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
              {trendingItems.map((item) => (
-                <ItemCard key={item.id} item={item} />
+                <ItemCard key={item.id} item={item} onClick={() => onItemClick && onItemClick(item)} />
              ))}
              {trendingItems.length === 0 && (
                 <div className="col-span-full text-center py-8 text-slate-400 text-sm">

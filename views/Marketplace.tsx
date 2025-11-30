@@ -7,9 +7,10 @@ import { api } from '../services/api';
 interface MarketplaceProps {
   type: ModuleType;
   onBack: () => void;
+  onItemClick?: (item: Item) => void;
 }
 
-export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack }) => {
+export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemClick }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,7 +149,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack }) => {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 lg:gap-8">
             {items.map((item, index) => (
               <div key={item.id} className="animate-in fade-in zoom-in duration-500" style={{ animationDelay: `${index * 50}ms` }}>
-                <ItemCard item={item} />
+                <ItemCard item={item} onClick={() => onItemClick && onItemClick(item)} />
               </div>
             ))}
           </div>

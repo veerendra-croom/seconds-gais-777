@@ -10,9 +10,9 @@ interface NavigationProps {
 export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) => {
   const navItems = [
     { id: 'HOME', icon: Home, label: 'Home' },
-    { id: 'BUY', icon: ShoppingBag, label: 'Shop' },
+    { id: 'BUY', icon: ShoppingBag, label: 'Shop', activeMatch: ['BUY', 'RENT', 'SHARE', 'SWAP', 'EARN', 'ITEM_DETAIL'] },
     { id: 'SELL', icon: PlusCircle, label: 'Post', highlight: true },
-    { id: 'REQUEST', icon: MessageCircle, label: 'Requests' },
+    { id: 'CHAT_LIST', icon: MessageCircle, label: 'Messages', activeMatch: ['CHAT_LIST', 'CHAT_ROOM'] }, // Renamed to Messages and mapped to CHAT_LIST
     { id: 'PROFILE', icon: User, label: 'Profile' },
   ];
 
@@ -22,7 +22,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) 
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] pb-safe z-50 transition-all duration-300">
         <div className="flex justify-around items-center h-16 px-2">
           {navItems.map((item) => {
-            const isActive = currentView === item.id;
+            const isActive = currentView === item.id || (item.activeMatch && item.activeMatch.includes(currentView));
             const Icon = item.icon;
             
             if (item.highlight) {
@@ -65,7 +65,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) 
 
         <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-2">
           {navItems.map((item) => {
-            const isActive = currentView === item.id;
+            const isActive = currentView === item.id || (item.activeMatch && item.activeMatch.includes(currentView));
             const Icon = item.icon;
 
             return (

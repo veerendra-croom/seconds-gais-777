@@ -1,4 +1,5 @@
-export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE';
+
+export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE' | 'ITEM_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'LANDING' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS';
 
 export enum Category {
   ELECTRONICS = 'Electronics',
@@ -30,10 +31,14 @@ export interface Item {
 
 export interface UserProfile {
   id: string;
-  email: string;
+  email: string; // This is the login email (Personal for students, Any for admin)
+  personalEmail?: string;
+  collegeEmail?: string;
+  collegeEmailVerified?: boolean;
   name: string;
   college: string;
-  verified: boolean;
+  role: 'STUDENT' | 'ADMIN';
+  verified: boolean; // ID Card verification
   savings: number; // Sustainability metric
   earnings: number;
   avatar: string;
@@ -45,4 +50,46 @@ export interface NavItem {
   label: string;
   icon: any; // Lucide icon component
   color: string;
+}
+
+export interface Message {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  itemId?: string;
+  content: string;
+  createdAt: string;
+  isRead: boolean;
+}
+
+export interface Conversation {
+  partnerId: string;
+  partnerName: string;
+  partnerAvatar: string;
+  lastMessage: string;
+  lastMessageTime: string;
+  itemId?: string;
+  itemTitle?: string;
+  itemImage?: string;
+  unreadCount: number;
+}
+
+export interface Transaction {
+  id: string;
+  itemId: string;
+  buyerId: string;
+  sellerId: string;
+  amount: number;
+  status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
+  createdAt: string;
+}
+
+export interface Booking {
+  id: string;
+  serviceId: string;
+  bookerId: string;
+  providerId: string;
+  bookingDate: string;
+  status: 'REQUESTED' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED';
+  createdAt: string;
 }

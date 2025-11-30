@@ -5,6 +5,7 @@ export const MOCK_USER: UserProfile = {
   email: 'alex.j@stanford.edu',
   name: "Alex Johnson",
   college: "Stanford University",
+  role: 'STUDENT',
   verified: true,
   savings: 450,
   earnings: 1200,
