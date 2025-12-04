@@ -1,8 +1,7 @@
+
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize the Gemini API client
-// Note: In a real production app, ensure the key is proxying through a backend or strict RLS
-// For this demo, we assume process.env.API_KEY is injected safely.
 const apiKey = process.env.API_KEY || 'dummy-key-for-demo'; 
 const ai = new GoogleGenAI({ apiKey });
 
@@ -56,8 +55,50 @@ export const suggestPrice = async (itemTitle: string): Promise<string> => {
       model: 'gemini-2.5-flash',
       contents: `Give me a single number representing the estimated used market price in USD for a used "${itemTitle}" in good condition for a college student. return only the number.`,
     });
-    return response.text.trim();
+    return response.text?.trim() || "N/A";
    } catch (e) {
      return "N/A";
    }
+}
+
+/**
+ * Visual Search: Analyzes an image to generate a search query.
+ */
+export const analyzeImageForSearch = async (file: File): Promise<string> => {
+  try {
+    if (!process.env.API_KEY) return "";
+
+    // Convert file to base64
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+    });
+
+    // Remove the data URL prefix (e.g. "data:image/jpeg;base64,")
+    const base64String = base64Data.split(',')[1];
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash', // Using flash for speed/vision capabilities
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: file.type,
+              data: base64String
+            }
+          },
+          {
+            text: "Identify the main item in this picture. Return ONLY the product name or category that I should search for in a marketplace (e.g. 'Graphing Calculator' or 'Calculus Textbook'). Keep it under 4 words."
+          }
+        ]
+      }
+    });
+
+    return response.text?.trim() || "";
+  } catch (e) {
+    console.error("Visual Search Error:", e);
+    return "";
+  }
 }

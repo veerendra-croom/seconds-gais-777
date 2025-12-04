@@ -1,28 +1,38 @@
-import React, { useEffect, useState } from 'react';
-import { ModuleType, Item, UserProfile } from '../types';
-import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { ModuleType, Item, UserProfile, Notification } from '../types';
+import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
+import { analyzeImageForSearch } from '../services/geminiService';
+import { useToast } from '../components/Toast';
 
 interface HomeProps {
   user: UserProfile;
   onModuleSelect: (module: ModuleType) => void;
   onItemClick?: (item: Item) => void;
+  onSearch: (query: string) => void;
 }
 
 const modules = [
-  { id: 'BUY', label: 'Buy', icon: ShoppingCart, color: 'from-blue-500 to-blue-600', shadow: 'shadow-blue-200' },
-  { id: 'SELL', label: 'Sell', icon: Tag, color: 'from-green-500 to-green-600', shadow: 'shadow-green-200' },
-  { id: 'RENT', label: 'Rent', icon: Clock, color: 'from-orange-500 to-orange-600', shadow: 'shadow-orange-200' },
-  { id: 'SHARE', label: 'Share', icon: Users, color: 'from-teal-500 to-teal-600', shadow: 'shadow-teal-200' },
-  { id: 'SWAP', label: 'Swap', icon: Repeat, color: 'from-purple-500 to-purple-600', shadow: 'shadow-purple-200' },
-  { id: 'EARN', label: 'Earn', icon: Briefcase, color: 'from-rose-500 to-rose-600', shadow: 'shadow-rose-200' },
-  { id: 'REQUEST', label: 'Request', icon: HandHeart, color: 'from-indigo-500 to-indigo-600', shadow: 'shadow-indigo-200' },
+  { id: 'BUY', label: 'Buy', icon: ShoppingCart, color: 'bg-blue-500', gradient: 'from-blue-400 to-blue-600' },
+  { id: 'SELL', label: 'Sell', icon: Tag, color: 'bg-green-500', gradient: 'from-green-400 to-green-600' },
+  { id: 'RENT', label: 'Rent', icon: Clock, color: 'bg-orange-500', gradient: 'from-orange-400 to-orange-600' },
+  { id: 'SHARE', label: 'Share', icon: Users, color: 'bg-teal-500', gradient: 'from-teal-400 to-teal-600' },
+  { id: 'SWAP', label: 'Swap', icon: Repeat, color: 'bg-purple-500', gradient: 'from-purple-400 to-purple-600' },
+  { id: 'EARN', label: 'Earn', icon: Briefcase, color: 'bg-rose-500', gradient: 'from-rose-400 to-rose-600' },
+  { id: 'REQUEST', label: 'Request', icon: HandHeart, color: 'bg-indigo-500', gradient: 'from-indigo-400 to-indigo-600' },
 ];
 
-export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick }) => {
+export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch }) => {
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     const fetchTrending = async () => {
@@ -35,122 +45,156 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick })
         setLoading(false);
       }
     };
+    
     fetchTrending();
-  }, []);
+    fetchNotifications();
+    
+    // Subscribe to realtime notifications
+    const subscription = api.subscribeToNotifications(user.id, (newNotif) => {
+       setNotifications(prev => [newNotif, ...prev]);
+       showToast(newNotif.title, 'info');
+    });
+
+    const stored = localStorage.getItem('recent_searches');
+    if (stored) setRecentSearches(JSON.parse(stored));
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user.id]);
+
+  const fetchNotifications = async () => {
+    try {
+      const notes = await api.getNotifications(user.id);
+      setNotifications(notes);
+    } catch (e) { console.error(e); }
+  }
+
+  const handleSearchSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (searchQuery.trim()) {
+      const newHistory = [searchQuery, ...recentSearches.filter(q => q !== searchQuery)].slice(0, 5);
+      localStorage.setItem('recent_searches', JSON.stringify(newHistory));
+      onSearch(searchQuery);
+    }
+  };
+
+  const handleImageSearch = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setAnalyzingImage(true);
+      showToast("Analyzing image...", 'info');
+      try {
+        const term = await analyzeImageForSearch(e.target.files[0]);
+        if (term) {
+          setSearchQuery(term);
+          showToast(`Found: ${term}`, 'success');
+          onSearch(term); 
+        } else {
+          showToast("Could not identify item.", 'error');
+        }
+      } catch (err) { showToast("Visual search failed", 'error'); } 
+      finally { setAnalyzingImage(false); }
+    }
+  };
 
   return (
-    <div className="pb-28 md:pb-8 max-w-7xl mx-auto min-h-screen">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md md:bg-transparent md:pt-8 px-4 pt-4 pb-4 sticky top-0 md:static z-20 border-b border-slate-100 md:border-none transition-all">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="flex justify-between items-center mb-0">
-            <div>
-              <h1 className="text-xl md:text-3xl font-bold text-slate-800 tracking-tight">
-                Hello, {user.name?.split(' ')[0] || 'Student'} <span className="inline-block animate-wave">👋</span>
-              </h1>
-              <p className="text-xs md:text-sm text-slate-500 flex items-center mt-1 font-medium">
-                <span className="relative flex h-2.5 w-2.5 mr-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
-                </span>
-                {user.college || 'My Campus'}
-              </p>
-            </div>
-            <button className="relative md:hidden p-2 hover:bg-slate-100 rounded-full transition-colors">
-               <Bell className="text-slate-600" size={24} />
-               <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-            </button>
-          </div>
-
-          <div className="flex-1 md:max-w-md mx-auto w-full">
-            <div className="relative group">
-              <input 
-                type="text" 
-                placeholder="Search items, services, or peers..." 
-                className="w-full bg-slate-100 md:bg-white border border-transparent md:border-slate-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none shadow-sm transition-all"
-              />
-              <Search className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-primary-500 transition-colors" size={20} />
-            </div>
+    <div className="pb-32 md:pb-8 max-w-7xl mx-auto min-h-screen">
+      {/* Premium Header */}
+      <header className="px-6 pt-12 pb-4 sticky top-0 md:static z-30 transition-all">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tighter">
+              Hello, {user.name?.split(' ')[0]} <span className="inline-block animate-wave origin-bottom-right">👋</span>
+            </h1>
+            <p className="text-sm text-slate-500 font-medium flex items-center mt-1">
+              <span className="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span>
+              {user.college}
+            </p>
           </div>
           
-          <div className="hidden md:flex items-center space-x-4">
-             <button className="relative bg-white p-3 rounded-full shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50 hover:shadow-md transition-all">
-               <Bell className="text-slate-600" size={20} />
-               <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-             </button>
-             <div className="flex items-center space-x-2 bg-white pl-1 pr-3 py-1 rounded-full border border-slate-100 shadow-sm cursor-pointer hover:bg-slate-50">
-                <img src={user.avatar} alt="Profile" className="w-8 h-8 rounded-full" />
-                <span className="text-sm font-medium text-slate-700">{user.name?.split(' ')[0]}</span>
-             </div>
-          </div>
+          <button 
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="glass w-12 h-12 rounded-full flex items-center justify-center relative shadow-sm hover:shadow-md transition-all active:scale-95"
+          >
+             <Bell className="text-slate-700" size={22} />
+             {notifications.some(n => !n.isRead) && <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
+          </button>
+        </div>
+
+        {/* Floating Search */}
+        <div className="relative z-30">
+          <form onSubmit={handleSearchSubmit} className="relative group">
+            <div className={`absolute inset-0 bg-gradient-to-r from-blue-100 to-purple-100 rounded-2xl blur-lg opacity-40 group-focus-within:opacity-70 transition-opacity`}></div>
+            <input 
+              type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={analyzingImage ? "Analyzing..." : "Search items, services..."}
+              className="relative w-full bg-white/90 backdrop-blur-xl border border-white/50 rounded-2xl py-4 pl-12 pr-12 text-sm font-medium shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:shadow-[0_8px_30px_rgb(0,0,0,0.08)] outline-none transition-all placeholder:text-slate-400"
+              disabled={analyzingImage}
+            />
+            <Search className="absolute left-4 top-4 text-slate-400" size={20} />
+            <button 
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute right-3 top-3 p-1.5 text-slate-400 hover:text-primary-500 hover:bg-slate-100 rounded-lg transition-all"
+            >
+              {analyzingImage ? <Loader2 size={20} className="animate-spin"/> : <Camera size={20} />}
+            </button>
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSearch} />
+          </form>
         </div>
       </header>
 
-      {/* Hero Stats */}
-      <div className="px-4 py-2">
-        <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-3xl p-6 md:p-8 text-white shadow-xl shadow-primary-900/20 md:flex md:items-center md:justify-between relative overflow-hidden group">
-          
-          {/* Decorative Circles */}
-          <div className="absolute -top-24 -right-24 w-48 h-48 bg-white/10 rounded-full blur-2xl group-hover:bg-white/20 transition-all duration-1000"></div>
-          <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-primary-500/30 rounded-full blur-3xl"></div>
-
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-6">
-             <div className="space-y-1">
-                <div className="flex items-center space-x-2 text-primary-100 mb-1">
-                   <Sparkles size={16} />
-                   <span className="text-xs md:text-sm font-medium uppercase tracking-wider">Total Impact</span>
-                </div>
-                <h2 className="text-4xl md:text-5xl font-bold tracking-tight">${user.savings || 0}</h2>
-                <p className="text-primary-100 text-sm">Saved this semester</p>
+      {/* Holographic Stats Card */}
+      <div className="px-6 py-2 animate-slide-up">
+        <div className="holo-card rounded-[32px] p-8 text-white shadow-xl shadow-blue-500/20 relative overflow-hidden group">
+          <div className="relative z-10">
+             <div className="flex items-center space-x-2 text-blue-100 mb-2">
+                <Sparkles size={16} />
+                <span className="text-xs font-bold uppercase tracking-widest">Sustainability Impact</span>
+             </div>
+             <div className="flex items-baseline gap-1">
+                <span className="text-5xl font-black tracking-tighter">${user.savings || 0}</span>
+                <span className="text-lg font-medium text-blue-100">saved</span>
              </div>
              
-             <div className="h-px w-full md:w-px md:h-16 bg-white/20 my-4 md:my-0"></div>
-
-             <div className="grid grid-cols-2 gap-8 md:gap-12">
+             <div className="mt-6 flex gap-8">
                 <div>
                    <p className="text-2xl font-bold">12kg</p>
-                   <p className="text-xs text-primary-200">CO₂ Avoided</p>
+                   <p className="text-xs text-blue-200 uppercase font-bold tracking-wider">CO₂ Saved</p>
                 </div>
                 <div>
                    <p className="text-2xl font-bold">8</p>
-                   <p className="text-xs text-primary-200">Items Recycled</p>
+                   <p className="text-xs text-blue-200 uppercase font-bold tracking-wider">Items</p>
                 </div>
              </div>
           </div>
-
-          <div className="relative z-10 mt-6 md:mt-0">
-             <button className="w-full md:w-auto bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all">
-                View Analytics
-             </button>
-          </div>
+          <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
         </div>
       </div>
 
       {/* Modules Grid */}
-      <div className="px-4 mt-8">
-        <h3 className="font-bold text-slate-800 mb-6 text-lg md:text-xl flex items-center">
-          What would you like to do?
-        </h3>
-        <div className="grid grid-cols-3 xs:grid-cols-4 md:grid-cols-7 gap-4 md:gap-8">
-          {modules.map((mod) => {
+      <div className="px-6 mt-10">
+        <h3 className="font-bold text-slate-900 mb-6 text-lg">Explore Campus</h3>
+        <div className="grid grid-cols-4 md:grid-cols-7 gap-4">
+          {modules.map((mod, i) => {
             const Icon = mod.icon;
             return (
               <button
                 key={mod.id}
                 onClick={() => onModuleSelect(mod.id as ModuleType)}
-                className="flex flex-col items-center gap-3 group"
+                className="flex flex-col items-center gap-2 group animate-slide-up"
+                style={{ animationDelay: `${i * 50}ms` }}
               >
                 <div className={`
-                  bg-gradient-to-br ${mod.color} 
-                  w-full aspect-square rounded-2xl md:rounded-3xl shadow-lg ${mod.shadow} 
-                  flex items-center justify-center text-white 
-                  transform transition-all duration-300 
-                  group-hover:-translate-y-1 group-hover:shadow-xl group-active:scale-95
-                  max-w-[70px] md:max-w-[90px]
+                  w-16 h-16 rounded-[20px] bg-gradient-to-br ${mod.gradient}
+                  flex items-center justify-center text-white shadow-lg shadow-slate-200
+                  transform transition-all duration-300 group-hover:scale-110 group-hover:-translate-y-1
                 `}>
-                  <Icon size={28} className="md:w-8 md:h-8" />
+                  <Icon size={24} strokeWidth={2.5} />
                 </div>
-                <span className="text-xs md:text-sm font-medium text-slate-600 group-hover:text-primary-600 transition-colors text-center leading-tight">
+                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900 transition-colors">
                   {mod.label}
                 </span>
               </button>
@@ -159,35 +203,49 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick })
         </div>
       </div>
 
-      {/* Trending Section */}
-      <div className="mt-10 px-4">
-        <div className="flex justify-between items-center mb-5">
-          <h3 className="font-bold text-slate-800 text-lg md:text-xl">Trending in Campus</h3>
-          <button className="text-sm text-primary-600 font-semibold hover:text-primary-700 hover:underline">View All</button>
+      {/* Trending */}
+      <div className="mt-12 px-6">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="font-bold text-slate-900 text-lg">Trending Now</h3>
+          <button className="text-sm font-bold text-primary-600 hover:text-primary-700">See All</button>
         </div>
         
         {loading ? (
            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-             {[1, 2, 3, 4].map((i) => (
-               <div key={i} className={`bg-white rounded-2xl p-3 border border-slate-100 shadow-sm animate-pulse ${i > 2 ? 'hidden md:block' : ''}`}>
-                  <div className="aspect-[4/3] bg-slate-100 rounded-xl mb-3"></div>
-                  <div className="h-4 w-3/4 bg-slate-100 rounded mb-2"></div>
-               </div>
-             ))}
+             {[1, 2].map((i) => <div key={i} className="bg-slate-100 rounded-2xl h-48 animate-pulse"></div>)}
            </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-             {trendingItems.map((item) => (
-                <ItemCard key={item.id} item={item} onClick={() => onItemClick && onItemClick(item)} />
-             ))}
-             {trendingItems.length === 0 && (
-                <div className="col-span-full text-center py-8 text-slate-400 text-sm">
-                   No trending items yet. Be the first to list something!
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+             {trendingItems.map((item, i) => (
+                <div key={item.id} className="animate-in fade-in zoom-in duration-500" style={{ animationDelay: `${i * 100}ms` }}>
+                   <ItemCard item={item} onClick={() => onItemClick && onItemClick(item)} />
                 </div>
-             )}
+             ))}
           </div>
         )}
       </div>
+      
+      {/* Mobile Notification Sheet */}
+      {showNotifications && (
+        <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm md:hidden" onClick={() => setShowNotifications(false)}>
+           <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-6 shadow-2xl animate-slide-up max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-6">
+                 <h3 className="font-bold text-xl">Notifications</h3>
+                 <button onClick={() => setShowNotifications(false)} className="p-2 bg-slate-100 rounded-full"><X size={20}/></button>
+              </div>
+              <div className="space-y-3">
+                 {notifications.length === 0 ? <p className="text-center text-slate-400 py-10">No new alerts</p> : 
+                   notifications.map(n => (
+                     <div key={n.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <p className="font-bold text-sm text-slate-900">{n.title}</p>
+                        <p className="text-xs text-slate-500 mt-1">{n.message}</p>
+                     </div>
+                   ))
+                 }
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, Camera, Sparkles, Loader2, X, AlertCircle, Upload, Save, Trash2, Image as ImageIcon, Plus, ArrowLeft, ArrowRight, RefreshCw, GripHorizontal } from 'lucide-react';
 import { generateItemDescription, suggestPrice } from '../services/geminiService';
 import { Category, UserProfile, Item } from '../types';
 import { api } from '../services/api';
+import { useToast } from '../components/Toast';
 
 interface SellItemProps {
   onBack: () => void;
@@ -27,6 +29,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<string>('');
+  const { showToast } = useToast();
   
   // Media State
   const [images, setImages] = useState<ImageUpload[]>([]);
@@ -67,7 +70,6 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       if (savedDraft) {
         try {
           const parsed = JSON.parse(savedDraft);
-          // Only restore if it looks valid
           if (parsed.title || parsed.description || parsed.price) {
              setFormData(parsed);
              setAutoSaveStatus('Draft restored');
@@ -82,7 +84,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
 
   // 2. Auto-Save Logic (Only for new items)
   useEffect(() => {
-    if (itemToEdit) return; // Don't auto-save over editing items yet, complex state
+    if (itemToEdit) return;
 
     const saveTimer = setInterval(() => {
       if (formData.title || formData.description || formData.price) {
@@ -90,14 +92,14 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         setAutoSaveStatus('Auto-saved');
         setTimeout(() => setAutoSaveStatus(''), 2000);
       }
-    }, 30000); // Save every 30 seconds
+    }, 30000);
 
     return () => clearInterval(saveTimer);
   }, [formData, itemToEdit]);
 
   const handleSmartGenerate = async () => {
     if (!formData.title) {
-       setError("Please enter a title first!");
+       showToast("Please enter a title first!", 'error');
        return;
     }
     setError(null);
@@ -108,7 +110,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
           formData.title,
           formData.category,
           formData.condition,
-          "Used on campus"
+          formData.type === 'REQUEST' ? "Looking for this item" : "Used on campus"
         ),
         suggestPrice(formData.title)
       ]);
@@ -118,8 +120,9 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         description: desc,
         price: price !== "N/A" && !isNaN(parseFloat(price)) ? price : prev.price
       }));
+      showToast("Description generated!", 'success');
     } catch (err) {
-      setError("Failed to generate content. Please try again.");
+      showToast("Failed to generate content.", 'error');
     } finally {
       setLoading(false);
     }
@@ -136,11 +139,9 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         progress: 0
       }));
       
-      // Limit to 8 total
       const totalImages = [...images, ...newImages].slice(0, 8);
       setImages(totalImages);
       
-      // Trigger uploads for new pending images
       newImages.forEach(img => {
         if (totalImages.find(i => i.id === img.id)) {
            uploadSingleImage(img);
@@ -154,7 +155,6 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
 
     setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'uploading' } : i));
 
-    // Simulate progress intervals for UX
     const interval = setInterval(() => {
       setImages(prev => prev.map(i => {
         if (i.id === img.id && i.status === 'uploading' && i.progress < 90) {
@@ -162,7 +162,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         }
         return i;
       }));
-    }, 200);
+    }, 500);
 
     try {
       const publicUrl = await api.uploadImage(img.file);
@@ -171,11 +171,13 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       if (publicUrl) {
          setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'complete', url: publicUrl, progress: 100 } : i));
       } else {
-         throw new Error("Upload failed");
+         throw new Error("Upload failed or timed out");
       }
     } catch (err) {
       clearInterval(interval);
+      console.error(err);
       setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'error', progress: 0 } : i));
+      showToast("Image upload failed. Check connection.", 'error');
     }
   };
 
@@ -189,15 +191,13 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
     setImages(prev => prev.filter(i => i.id !== id));
   };
 
-  // Drag and Drop Handlers
   const onDragStart = (e: React.DragEvent, index: number) => {
     setDraggedImageIndex(index);
-    // Required for Firefox
     e.dataTransfer.effectAllowed = "move";
   };
 
   const onDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault(); 
     e.dataTransfer.dropEffect = "move";
   };
 
@@ -207,17 +207,13 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
 
     const newImages = [...images];
     const draggedImage = newImages[draggedImageIndex];
-
-    // Remove from old position
     newImages.splice(draggedImageIndex, 1);
-    // Insert at new position
     newImages.splice(dropIndex, 0, draggedImage);
 
     setImages(newImages);
     setDraggedImageIndex(null);
   };
 
-  // Fallback buttons for accessibility/mobile
   const moveImage = (index: number, direction: 'left' | 'right') => {
     if (direction === 'left' && index > 0) {
       const newImages = [...images];
@@ -235,34 +231,33 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
     setDeleteLoading(true);
     try {
       await api.deleteItem(itemToEdit.id);
+      showToast("Listing deleted", 'success');
       onBack();
     } catch (err: any) {
-      setError("Failed to delete item.");
+      showToast("Failed to delete item", 'error');
       setDeleteLoading(false);
     }
   };
 
   const handleSave = async (status: 'ACTIVE' | 'DRAFT') => {
-    // Validation
     if (!formData.title) {
-      setError("Title is required.");
+      showToast("Title is required.", 'error');
       return;
     }
     
-    // Check pending uploads
     const pendingUploads = images.some(i => i.status === 'uploading' || i.status === 'pending');
     if (pendingUploads) {
-      setError("Please wait for images to finish uploading.");
+      showToast("Please wait for uploads to finish.", 'error');
       return;
     }
 
     if (status === 'ACTIVE') {
-      if (!formData.price) {
-        setError("Price is required for active listings.");
+      if (!formData.price && formData.type !== 'REQUEST') {
+        showToast("Price is required for active listings.", 'error');
         return;
       }
-      if (images.length === 0) {
-        setError("At least one image is required for active listings.");
+      if (images.length === 0 && formData.type !== 'REQUEST') {
+        showToast("At least one image is required.", 'error');
         return;
       }
     }
@@ -270,10 +265,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
     if (status === 'ACTIVE') setPublishLoading(true);
     else setDraftLoading(true);
     
-    setError(null);
-
     try {
-      // Collect valid URLs
       const validImageUrls = images
         .filter(i => i.status === 'complete')
         .map(i => i.url);
@@ -292,11 +284,12 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
 
       if (itemToEdit) {
         await api.updateItem(itemToEdit.id, itemData);
+        showToast("Listing updated!", 'success');
       } else {
         await api.createItem(itemData, user.id, user.college);
+        showToast(status === 'ACTIVE' ? "Published successfully!" : "Draft saved", 'success');
       }
 
-      // Clear draft if successful
       if (!itemToEdit) {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
       }
@@ -304,7 +297,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       onBack();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to save item");
+      showToast(err.message || "Failed to save item", 'error');
     } finally {
       setPublishLoading(false);
       setDraftLoading(false);
@@ -455,6 +448,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                   <option value="RENT">Rent Out</option>
                   <option value="SWAP">Swap Item</option>
                   <option value="SERVICE">Offer Service</option>
+                  <option value="REQUEST">Request Item</option>
                 </select>
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                   <ChevronLeft size={20} className="-rotate-90" />
@@ -463,7 +457,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Title</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">{formData.type === 'REQUEST' ? 'What do you need?' : 'Title'}</label>
               <input 
                 type="text"
                 value={formData.title}
@@ -471,7 +465,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                   setFormData({...formData, title: e.target.value});
                   if (error) setError(null);
                 }}
-                placeholder="e.g. Calculus Textbook, Graphing Calculator"
+                placeholder={formData.type === 'REQUEST' ? "e.g. Graphing Calculator for 2 days" : "e.g. Calculus Textbook, Graphing Calculator"}
                 className="w-full p-3.5 bg-white rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 focus:border-transparent text-base outline-none transition-shadow placeholder:text-slate-300"
               />
             </div>
@@ -493,7 +487,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Price ($)</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">{formData.type === 'REQUEST' ? 'Max Budget ($)' : 'Price ($)'}</label>
                 <input 
                   type="number"
                   value={formData.price}
@@ -526,17 +520,10 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
               </button>
             </div>
             
-            {error && (
-              <div className="mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg flex items-center">
-                <AlertCircle size={14} className="mr-1.5" />
-                {error}
-              </div>
-            )}
-            
             <textarea 
               value={formData.description}
               onChange={(e) => setFormData({...formData, description: e.target.value})}
-              placeholder="Detailed description of your item..."
+              placeholder={formData.type === 'REQUEST' ? "Describe exactly what you need and for how long..." : "Detailed description of your item..."}
               className="w-full p-4 bg-white/80 backdrop-blur rounded-xl border border-indigo-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base h-32 outline-none resize-none transition-shadow"
             />
           </div>
@@ -558,7 +545,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                className="w-full md:w-auto md:px-12 bg-slate-900 text-white py-4 rounded-xl font-bold text-base shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center justify-center disabled:opacity-70 disabled:active:scale-100"
              >
                {publishLoading ? <Loader2 className="animate-spin mr-2" /> : <Upload className="mr-2" size={20} />}
-               {itemToEdit ? 'Update Listing' : 'Publish Listing'}
+               {itemToEdit ? 'Update Listing' : formData.type === 'REQUEST' ? 'Post Request' : 'Publish Listing'}
              </button>
           </div>
         </div>

@@ -15,12 +15,15 @@ import { ChatView } from './views/ChatView';
 import { LandingView } from './views/LandingView';
 import { CollegeLinkView } from './views/CollegeLinkView';
 import { AdminDashboard } from './views/AdminDashboard';
+import { SplashView } from './views/SplashView';
+import { StaticPages } from './views/StaticPages';
+import { ToastProvider } from './components/Toast';
+import { OnboardingTour } from './components/OnboardingTour';
 import { ModuleType, UserProfile, Item, Conversation } from './types';
-import { Loader2 } from 'lucide-react';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [session, setSession] = useState<any>(null);
-  const [appState, setAppState] = useState<'LOADING' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'VERIFICATION' | 'APP' | 'ADMIN_DASHBOARD'>('LOADING');
+  const [appState, setAppState] = useState<'LOADING' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'VERIFICATION' | 'APP' | 'ADMIN_DASHBOARD' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS'>('LOADING');
   const [currentView, setCurrentView] = useState<ModuleType>('HOME');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   
@@ -28,6 +31,10 @@ const App: React.FC = () => {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  
+  // Onboarding State
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     // 1. Check active session on mount
@@ -36,7 +43,7 @@ const App: React.FC = () => {
       if (session) {
         handleUserLoaded(session.user.id);
       } else {
-        setAppState('LANDING'); // Default to Landing Page if no session
+        setTimeout(() => setAppState('LANDING'), 1500);
       }
     });
 
@@ -61,7 +68,6 @@ const App: React.FC = () => {
       let profile = await api.getProfile(userId);
       
       // --- LAZY PROFILE CREATION ---
-      // If user exists in Auth but not in Profiles table (e.g. after email confirmation)
       if (!profile) {
         console.log("Profile missing, attempting lazy creation...");
         const { data: { user } } = await supabase.auth.getUser();
@@ -104,14 +110,17 @@ const App: React.FC = () => {
         const hasSkipped = localStorage.getItem('skipped_verification');
         if (profile.verified || profile.verificationStatus === 'VERIFIED' || hasSkipped) {
           setAppState('APP');
+          // Check for onboarding
+          const hasSeenTour = localStorage.getItem(`onboarding_complete_${userId}`);
+          if (!hasSeenTour) {
+             setShowOnboarding(true);
+          }
         } else {
           setAppState('VERIFICATION');
         }
       } else {
-        // If still no profile, something is wrong with DB permissions or connection
         console.error("Critical: User authenticated but profile creation failed.");
-        setAppState('AUTH'); // Go back to auth to try again or show error
-        // Optionally signOut() here, but keeping them logged in allows retry
+        setAppState('AUTH'); 
       }
     } catch (error) {
       console.error("Error loading user", error);
@@ -120,7 +129,6 @@ const App: React.FC = () => {
   };
 
   const handleCollegeLinkSuccess = () => {
-    // Re-fetch profile to update state
     if (session?.user?.id) handleUserLoaded(session.user.id);
   };
 
@@ -130,7 +138,14 @@ const App: React.FC = () => {
     if (session?.user?.id) handleUserLoaded(session.user.id);
   };
 
-  // ... (View Handlers same as before)
+  const handleOnboardingComplete = () => {
+    if (userProfile) {
+      localStorage.setItem(`onboarding_complete_${userProfile.id}`, 'true');
+    }
+    setShowOnboarding(false);
+  };
+
+  // ... (View Handlers)
   const handleEditItem = (item: Item) => {
     setEditingItem(item);
     setCurrentView('SELL');
@@ -161,18 +176,27 @@ const App: React.FC = () => {
   const handleViewChange = (view: ModuleType) => {
     if (currentView === 'SELL' && view !== 'SELL') setEditingItem(null);
     if (view === 'CHAT_LIST') setActiveConversation(null);
+    // Reset search when leaving marketplace if manually changing view
+    if (view !== 'BUY' && view !== 'RENT' && view !== 'SHARE' && view !== 'SWAP' && view !== 'EARN' && view !== 'REQUEST') {
+       setGlobalSearchQuery('');
+    }
     setCurrentView(view);
   }
+
+  const handleSearch = (query: string) => {
+    setGlobalSearchQuery(query);
+    setCurrentView('BUY'); // Default to Buy module for results
+  };
 
   const renderView = () => {
     if (!userProfile) return null;
 
     switch (currentView) {
-      case 'HOME': return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} />;
+      case 'HOME': return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} />;
       case 'SELL': return <SellItem user={userProfile} onBack={handleSellBack} itemToEdit={editingItem} />;
       case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} />;
       case 'ITEM_DETAIL': 
-        if (!selectedItem) return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} />;
+        if (!selectedItem) return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} />;
         return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={() => setCurrentView('HOME')} onChat={handleStartChat} />;
       case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={() => setCurrentView('HOME')} />;
       case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={() => setCurrentView('CHAT_LIST')} />;
@@ -182,23 +206,28 @@ const App: React.FC = () => {
       case 'SWAP':
       case 'EARN':
       case 'REQUEST':
-        return <Marketplace type={currentView} onBack={() => setCurrentView('HOME')} onItemClick={handleItemClick} />;
-      default: return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} />;
+        return <Marketplace type={currentView} onBack={() => setCurrentView('HOME')} onItemClick={handleItemClick} initialSearchQuery={globalSearchQuery} />;
+      default: return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} />;
     }
   };
 
   // --- STATE ROUTING ---
 
   if (appState === 'LOADING') {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary-500" size={40} />
-      </div>
-    );
+    return <SplashView />;
   }
 
   if (appState === 'LANDING') {
-    return <LandingView onGetStarted={() => setAppState('AUTH')} />;
+    return (
+      <LandingView 
+        onGetStarted={() => setAppState('AUTH')} 
+        onViewPage={(page) => setAppState(page as any)}
+      />
+    );
+  }
+
+  if (['TERMS', 'PRIVACY', 'SAFETY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(appState)) {
+    return <StaticPages type={appState as any} onBack={() => userProfile ? setAppState('APP') : setAppState('LANDING')} />;
   }
 
   if (appState === 'AUTH') {
@@ -219,12 +248,23 @@ const App: React.FC = () => {
 
   // Default APP State (Students)
   return (
-    <div className="bg-slate-50 min-h-screen flex w-full overflow-hidden">
+    <div className="bg-slate-50 min-h-screen flex w-full overflow-hidden relative">
       <Navigation currentView={currentView} setView={handleViewChange} />
       <main className="flex-1 w-full md:ml-64 h-screen overflow-y-auto overflow-x-hidden transition-all duration-300 relative">
         {renderView()}
       </main>
+      
+      {/* Onboarding Tour Overlay */}
+      {showOnboarding && <OnboardingTour onComplete={handleOnboardingComplete} />}
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 };
 

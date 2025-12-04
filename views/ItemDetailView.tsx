@@ -1,6 +1,16 @@
-import React, { useState } from 'react';
-import { Item, UserProfile } from '../types';
-import { ChevronLeft, Share2, Heart, MapPin, ShieldCheck, MessageCircle, ShoppingBag, Calendar, AlertTriangle, User, ChevronRight } from 'lucide-react';
+
+import React, { useState, useEffect } from 'react';
+import { Item, UserProfile, Review, Badge } from '../types';
+import { api } from '../services/api';
+import { ChevronLeft, Share2, Heart, MapPin, ShieldCheck, MessageCircle, ShoppingBag, Calendar, AlertTriangle, User, ChevronRight, Repeat, Flag, Star, HandHeart } from 'lucide-react';
+import { BookingModal } from '../components/BookingModal';
+import { PurchaseModal } from '../components/PurchaseModal';
+import { SwapModal } from '../components/SwapModal';
+import { FulfillModal } from '../components/FulfillModal';
+import { SafetyMap } from '../components/SafetyMap';
+import { ReviewModal } from '../components/ReviewModal';
+import { getUserBadges } from '../services/badgeService';
+import { useToast } from '../components/Toast';
 
 interface ItemDetailViewProps {
   item: Item;
@@ -10,225 +20,274 @@ interface ItemDetailViewProps {
   onBuy?: (item: Item) => void;
 }
 
-export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUser, onBack, onChat, onBuy }) => {
+export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUser, onBack, onChat }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [liked, setLiked] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [sellerBadges, setSellerBadges] = useState<Badge[]>([]);
+  const { showToast } = useToast();
+  
+  const [showBooking, setShowBooking] = useState(false);
+  const [showPurchase, setShowPurchase] = useState(false);
+  const [showSwap, setShowSwap] = useState(false);
+  const [showFulfill, setShowFulfill] = useState(false);
+  const [showReview, setShowReview] = useState(false);
 
   const images = item.images && item.images.length > 0 ? item.images : [item.image];
   const isOwnItem = item.sellerId === currentUser.id;
 
-  const nextImage = () => {
-    setCurrentImageIndex((prev) => (prev + 1) % images.length);
-  };
+  useEffect(() => {
+    if (item.sellerId) {
+       api.getReviews(item.sellerId).then(setReviews);
+       api.getProfile(item.sellerId).then(profile => {
+         if (profile) setSellerBadges(getUserBadges(profile));
+       });
+    }
+    api.checkIsSaved(currentUser.id, item.id).then(setIsSaved);
+  }, [item.id]);
 
-  const prevImage = () => {
-    setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length);
-  };
-
-  const handleAction = () => {
+  const handleMainAction = () => {
     if (isOwnItem) return;
-    if (item.type === 'SALE' && onBuy) {
-      onBuy(item);
-    } else if (onChat) {
-      onChat(item);
+    if (item.type === 'SERVICE') setShowBooking(true);
+    else if (item.type === 'SALE') setShowPurchase(true);
+    else if (item.type === 'SWAP') setShowSwap(true);
+    else if (item.type === 'REQUEST') setShowFulfill(true);
+    else if (onChat) onChat(item);
+  };
+
+  const handleToggleSave = async () => {
+    try {
+      const saved = await api.toggleSavedItem(currentUser.id, item.id);
+      setIsSaved(saved);
+      showToast(saved ? "Saved to Wishlist" : "Removed from Wishlist", 'info');
+    } catch (e) { console.error(e); }
+  };
+
+  const handleReport = async () => {
+    const reason = prompt("Please provide a reason for reporting this item:");
+    if (reason) {
+      try {
+        await api.createReport({
+          reporterId: currentUser.id,
+          itemId: item.id,
+          reason: reason
+        });
+        showToast("Report submitted successfully.", 'success');
+      } catch (e) {
+        showToast("Failed to submit report.", 'error');
+      }
     }
   };
 
-  const getActionLabel = () => {
-    if (isOwnItem) return 'This is your listing';
-    switch (item.type) {
-      case 'SALE': return 'Buy Now';
-      case 'RENT': return 'Check Availability';
-      case 'SWAP': return 'Propose Swap';
-      case 'SERVICE': return 'Book Service';
-      default: return 'Contact Seller';
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: item.title,
+          text: `Check out this ${item.title} on Seconds!`,
+          url: window.location.href
+        });
+      } catch (e) {
+        // User cancelled share
+      }
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      showToast("Link copied to clipboard!", 'success');
+    }
+  };
+
+  // --- TRANSACTION HANDLERS ---
+
+  const handlePurchase = async () => {
+    try {
+      await api.createTransaction({
+        buyerId: currentUser.id,
+        sellerId: item.sellerId,
+        itemId: item.id,
+        amount: item.price
+      });
+      showToast("Order placed successfully!", 'success');
+      setShowPurchase(false);
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to place order.", 'error');
+    }
+  };
+
+  const handleBooking = async (date: string, time: string) => {
+    try {
+      await api.createBooking({
+        bookerId: currentUser.id,
+        providerId: item.sellerId,
+        serviceId: item.id,
+        bookingDate: new Date(`${date}T${time}`).toISOString()
+      });
+      showToast("Booking request sent!", 'success');
+      setShowBooking(false);
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to book service.", 'error');
+    }
+  };
+
+  const handleSwap = async (offeredItemId: string) => {
+    try {
+      await api.createSwapProposal({
+        initiatorId: currentUser.id,
+        receiverId: item.sellerId,
+        targetItemId: item.id,
+        offeredItemId: offeredItemId
+      });
+      showToast("Swap proposal sent!", 'success');
+      setShowSwap(false);
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to send proposal.", 'error');
+    }
+  };
+
+  const handleFulfill = async (offeredItemId: string) => {
+    try {
+      await api.createSwapProposal({
+        initiatorId: currentUser.id,
+        receiverId: item.sellerId, 
+        targetItemId: item.id,     
+        offeredItemId: offeredItemId 
+      });
+      showToast("Offer sent to requester!", 'success');
+      setShowFulfill(false);
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to send offer.", 'error');
     }
   };
 
   return (
-    <div className="pb-24 md:pb-8 bg-white min-h-screen flex flex-col">
-      {/* Header */}
-      <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button 
-            onClick={onBack}
-            className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
-          >
-            <ChevronLeft size={24} />
-          </button>
-          <div className="flex gap-2">
-            <button className="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors">
-              <Share2 size={20} />
-            </button>
-            <button 
-              onClick={() => setLiked(!liked)}
-              className={`p-2 rounded-full transition-colors ${liked ? 'text-red-500 bg-red-50' : 'text-slate-600 hover:bg-slate-100'}`}
-            >
-              <Heart size={20} fill={liked ? "currentColor" : "none"} />
-            </button>
-          </div>
-        </div>
+    <div className="pb-32 md:pb-8 bg-white min-h-screen flex flex-col relative animate-fade-in">
+      {/* Floating Back Button */}
+      <div className="fixed top-4 left-4 z-40">
+        <button onClick={onBack} className="glass p-3 rounded-full text-slate-800 shadow-lg hover:bg-white transition-all">
+          <ChevronLeft size={24} />
+        </button>
       </div>
 
-      <div className="flex-1 max-w-4xl mx-auto w-full">
-        {/* Image Gallery */}
-        <div className="relative aspect-square md:aspect-[16/9] bg-slate-100 md:rounded-b-2xl overflow-hidden group">
-          <img 
-            src={images[currentImageIndex]} 
-            alt={`${item.title} view ${currentImageIndex + 1}`}
-            className="w-full h-full object-cover" 
-          />
+      <div className="flex-1 max-w-5xl mx-auto w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-8">
           
-          {images.length > 1 && (
-            <>
-              <button 
-                onClick={(e) => { e.stopPropagation(); prevImage(); }}
-                className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white p-2 rounded-full shadow-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <ChevronLeft size={24} />
-              </button>
-              <button 
-                onClick={(e) => { e.stopPropagation(); nextImage(); }}
-                className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white p-2 rounded-full shadow-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <ChevronRight size={24} />
-              </button>
-              
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-2">
+          {/* Gallery */}
+          <div className="relative aspect-square md:aspect-[4/3] bg-slate-100 md:rounded-3xl md:mt-4 md:ml-4 overflow-hidden group">
+            <img 
+              src={images[currentImageIndex]} 
+              alt={item.title}
+              className="w-full h-full object-cover transition-transform duration-700 hover:scale-105" 
+            />
+            {images.length > 1 && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 glass px-3 py-1.5 rounded-full">
                 {images.map((_, idx) => (
-                  <div 
-                    key={idx}
-                    className={`w-2 h-2 rounded-full transition-all ${idx === currentImageIndex ? 'bg-white w-4' : 'bg-white/50'}`}
-                  />
+                  <div key={idx} className={`w-1.5 h-1.5 rounded-full transition-all ${idx === currentImageIndex ? 'bg-slate-900 scale-125' : 'bg-slate-400'}`} />
                 ))}
               </div>
-            </>
-          )}
-
-          <div className="absolute top-4 left-4">
-            <span className="bg-white/90 backdrop-blur text-slate-900 text-xs font-bold px-3 py-1.5 rounded-full shadow-sm uppercase tracking-wider">
-              {item.type}
-            </span>
-          </div>
-        </div>
-
-        <div className="p-4 md:p-8 space-y-8">
-          {/* Main Info */}
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-slate-900 leading-tight mb-2">{item.title}</h1>
-                <div className="flex items-center text-slate-500 text-sm">
-                  <MapPin size={16} className="mr-1" />
-                  {item.college}
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-2xl md:text-3xl font-bold text-primary-600">
-                  {item.type === 'SWAP' ? 'SWAP' : `$${item.price}`}
-                </p>
-                {item.originalPrice && item.type === 'SALE' && (
-                  <p className="text-sm text-slate-400 line-through">${item.originalPrice}</p>
-                )}
-                {item.type === 'RENT' && <p className="text-xs text-slate-500">per day</p>}
-                {item.type === 'SERVICE' && <p className="text-xs text-slate-500">per hour</p>}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
-                {item.category}
-              </span>
-              <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
-                Condition: Good
-              </span>
-              <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
-                Posted {new Date().toLocaleDateString()}
-              </span>
-            </div>
-          </div>
-
-          <div className="h-px bg-slate-100 w-full" />
-
-          {/* Seller Info */}
-          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-white rounded-full border border-slate-200 flex items-center justify-center text-slate-300">
-                <User size={24} />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-900 flex items-center gap-1">
-                  {item.sellerName}
-                  {item.verified && <ShieldCheck size={14} className="text-green-500" />}
-                </h3>
-                <div className="flex items-center text-xs text-slate-500">
-                  <span>★ {item.rating}</span>
-                  <span className="mx-1">•</span>
-                  <span>{item.college}</span>
-                </div>
-              </div>
-            </div>
-            {!isOwnItem && (
-               <button 
-                 onClick={() => onChat && onChat(item)}
-                 className="p-3 bg-white border border-slate-200 text-slate-700 rounded-full hover:bg-slate-50 transition-colors shadow-sm"
-               >
-                 <MessageCircle size={20} />
-               </button>
             )}
-          </div>
-
-          {/* Description */}
-          <div>
-            <h3 className="font-bold text-slate-900 mb-3 text-lg">Description</h3>
-            <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">
-              {item.description || "No description provided."}
-            </p>
-          </div>
-
-          {/* Safety Notice */}
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-3">
-            <AlertTriangle className="text-amber-500 shrink-0" size={24} />
-            <div>
-              <h4 className="font-bold text-amber-800 text-sm mb-1">Meet in public places</h4>
-              <p className="text-amber-700 text-xs">
-                For your safety, always meet in busy campus locations like the library or student center. Never transfer money before seeing the item.
-              </p>
+            <div className="absolute top-4 right-4 glass px-4 py-2 rounded-full font-bold text-xs uppercase tracking-widest shadow-sm">
+              {item.type}
             </div>
           </div>
+
+          {/* Details */}
+          <div className="p-6 md:pt-8 space-y-8">
+            <div>
+              <div className="flex justify-between items-start mb-2">
+                <h1 className="text-3xl md:text-4xl font-black text-slate-900 leading-tight w-full pr-4">{item.title}</h1>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={handleShare} className="p-2 bg-slate-50 rounded-full hover:bg-blue-50 text-slate-400 hover:text-blue-500 transition-colors" title="Share">
+                    <Share2 size={24} />
+                  </button>
+                  {!isOwnItem && (
+                    <button onClick={handleReport} className="p-2 bg-slate-50 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="Report Item">
+                      <Flag size={24} />
+                    </button>
+                  )}
+                  <button onClick={handleToggleSave} className="p-2 bg-slate-50 rounded-full hover:bg-pink-50 text-slate-400 hover:text-pink-500 transition-colors" title="Save to Wishlist">
+                    <Heart size={24} fill={isSaved ? "currentColor" : "none"} className={isSaved ? "text-pink-500" : ""} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-slate-500 font-medium">
+                <MapPin size={16} /> {item.college}
+              </div>
+              <div className="mt-4 flex items-baseline gap-2">
+                <span className="text-4xl font-black text-slate-900 tracking-tight">${item.price}</span>
+                {item.originalPrice && <span className="text-lg text-slate-400 line-through decoration-2">${item.originalPrice}</span>}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+               <div className="bg-slate-100 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 uppercase tracking-wider">{item.category}</div>
+               <div className="bg-green-50 px-4 py-2 rounded-xl text-xs font-bold text-green-700 uppercase tracking-wider">Good Condition</div>
+            </div>
+
+            {/* Seller Card */}
+            <div className="bg-gradient-to-br from-slate-50 to-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center justify-between">
+               <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                     <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">
+                        <User size={24} />
+                     </div>
+                  </div>
+                  <div>
+                     <h3 className="font-bold text-slate-900 flex items-center gap-1.5">
+                        {item.sellerName}
+                        {item.verified && <ShieldCheck size={16} className="text-blue-500" />}
+                     </h3>
+                     <div className="flex items-center gap-1 text-xs font-bold text-amber-500 mt-1">
+                        <Star size={12} fill="currentColor" /> {item.rating} <span className="text-slate-400 font-medium ml-1">({reviews.length} reviews)</span>
+                     </div>
+                  </div>
+               </div>
+               {!isOwnItem && (
+                 <button onClick={() => onChat && onChat(item)} className="w-10 h-10 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-600 shadow-sm hover:scale-105 transition-transform">
+                    <MessageCircle size={20} />
+                 </button>
+               )}
+            </div>
+
+            <div className="space-y-3">
+               <h3 className="font-bold text-slate-900 text-lg">Description</h3>
+               <p className="text-slate-600 leading-relaxed">{item.description}</p>
+            </div>
+
+            <SafetyMap collegeName={item.college} />
+          </div>
         </div>
       </div>
 
-      {/* Sticky Action Bar */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 md:relative md:border-none md:bg-transparent md:p-8 md:max-w-4xl md:mx-auto">
-        <div className="flex gap-4">
-           {!isOwnItem ? (
-             <>
-               <button 
-                 onClick={() => onChat && onChat(item)}
-                 className="flex-1 py-4 bg-white border border-slate-300 text-slate-700 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-               >
-                 <MessageCircle size={20} />
-                 Chat
-               </button>
-               <button 
-                 onClick={handleAction}
-                 className="flex-[2] py-4 bg-slate-900 text-white rounded-xl font-bold shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center justify-center gap-2"
-               >
-                 {item.type === 'SALE' ? <ShoppingBag size={20} /> : <Calendar size={20} />}
-                 {getActionLabel()}
-               </button>
-             </>
-           ) : (
+      {/* Glass Action Dock */}
+      {!isOwnItem && (
+        <div className="fixed bottom-6 left-6 right-6 z-40 md:static md:p-0 md:mt-8 md:max-w-md">
+          <div className="glass p-2 rounded-[24px] shadow-[0_20px_40px_-12px_rgba(0,0,0,0.2)] border border-white/50 flex gap-2">
              <button 
-                onClick={onBack}
-                className="w-full py-4 bg-slate-100 text-slate-500 rounded-xl font-bold cursor-not-allowed"
+               onClick={() => onChat && onChat(item)}
+               className="flex-1 py-4 rounded-2xl font-bold text-slate-700 hover:bg-slate-100 transition-colors flex flex-col items-center justify-center gap-1"
              >
-               This is your listing
+               <MessageCircle size={20} />
+               <span className="text-[10px] uppercase tracking-wider">Chat</span>
              </button>
-           )}
+             <button 
+               onClick={handleMainAction}
+               className="flex-[2] py-4 bg-slate-900 text-white rounded-2xl font-bold shadow-lg flex items-center justify-center gap-2 text-lg hover:scale-[1.02] active:scale-95 transition-all"
+             >
+               {item.type === 'SALE' ? 'Buy Now' : item.type === 'RENT' ? 'Rent' : item.type === 'SERVICE' ? 'Book' : 'Action'}
+             </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Modals */}
+      <BookingModal isOpen={showBooking} onClose={() => setShowBooking(false)} serviceTitle={item.title} price={item.price} onConfirm={handleBooking} />
+      <PurchaseModal isOpen={showPurchase} onClose={() => setShowPurchase(false)} itemTitle={item.title} price={item.price} onConfirm={handlePurchase} />
+      <SwapModal isOpen={showSwap} onClose={() => setShowSwap(false)} targetItemTitle={item.title} userId={currentUser.id} onConfirm={handleSwap} />
+      <FulfillModal isOpen={showFulfill} onClose={() => setShowFulfill(false)} requestTitle={item.title} requesterName={item.sellerName} userId={currentUser.id} onRequestFulfill={handleFulfill} />
+      <ReviewModal isOpen={showReview} onClose={() => setShowReview(false)} targetUserId={item.sellerId || ''} targetUserName={item.sellerName} currentUserId={currentUser.id} />
     </div>
   );
 };

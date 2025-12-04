@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { Loader2, GraduationCap, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Loader2, GraduationCap, CheckCircle2, ArrowRight, LogOut } from 'lucide-react';
 import { api } from '../services/api';
+import { signOut } from '../services/supabaseClient';
 
 interface CollegeLinkViewProps {
   userId: string;
@@ -38,7 +39,14 @@ export const CollegeLinkView: React.FC<CollegeLinkViewProps> = ({ userId, onSucc
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 relative">
+      <button 
+        onClick={signOut}
+        className="absolute top-4 right-4 flex items-center gap-2 text-slate-400 hover:text-red-500 transition-colors text-sm font-bold"
+      >
+        <LogOut size={16} /> Sign Out
+      </button>
+
       <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden p-8 animate-fade-in text-center">
         <div className="w-20 h-20 bg-primary-50 text-primary-600 rounded-full flex items-center justify-center mx-auto mb-6">
           <GraduationCap size={40} />
