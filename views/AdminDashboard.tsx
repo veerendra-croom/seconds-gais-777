@@ -1,8 +1,7 @@
-
 import React, { useEffect, useState } from 'react';
-import { UserProfile, Report } from '../types';
+import { UserProfile, Report, College } from '../types';
 import { api } from '../services/api';
-import { ShieldCheck, Users, ShoppingBag, DollarSign, CheckCircle2, XCircle, Loader2, Key, Settings, LogOut, Flag, AlertTriangle, Trash2, TrendingUp, Activity, Ban, Search, Eye, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { ShieldCheck, Users, ShoppingBag, DollarSign, CheckCircle2, XCircle, Loader2, Key, Settings, LogOut, Flag, AlertTriangle, Trash2, TrendingUp, Activity, Ban, Search, Eye, ChevronLeft, ChevronRight, Clock, School, Plus, Save, Globe, Edit2, Layers, ToggleLeft, ToggleRight, Menu, X } from 'lucide-react';
 import { signOut } from '../services/supabaseClient';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from 'recharts';
 import { useToast } from '../components/Toast';
@@ -26,8 +25,8 @@ const VerificationCard: React.FC<{ user: any, onVerify: (id: string, approved: b
   }, [user.id]);
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex gap-6 animate-slide-up">
-      <div className="w-1/3 aspect-video bg-slate-100 rounded-xl overflow-hidden relative group border border-slate-200">
+    <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 animate-slide-up">
+      <div className="w-full md:w-1/3 aspect-video bg-slate-100 rounded-xl overflow-hidden relative group border border-slate-200">
          {loading ? (
            <div className="absolute inset-0 flex items-center justify-center">
              <Loader2 className="animate-spin text-slate-400" />
@@ -45,12 +44,12 @@ const VerificationCard: React.FC<{ user: any, onVerify: (id: string, approved: b
         <div className="flex justify-between items-start">
            <div>
               <h3 className="text-xl font-bold text-slate-800">{user.full_name}</h3>
-              <p className="text-slate-500 mb-2">{user.college} • {user.college_email}</p>
+              <p className="text-slate-500 mb-2 text-sm">{user.college} • {user.college_email}</p>
               <span className="px-2 py-1 bg-amber-50 text-amber-600 text-xs font-bold rounded-lg border border-amber-100">
                  Status: {user.verificationStatus || 'PENDING'}
               </span>
            </div>
-           <div className="text-right text-xs text-slate-400">
+           <div className="text-right text-xs text-slate-400 hidden sm:block">
               <p>ID: {user.id.substring(0,8)}...</p>
               <p>{new Date(user.created_at).toLocaleDateString()}</p>
            </div>
@@ -59,13 +58,13 @@ const VerificationCard: React.FC<{ user: any, onVerify: (id: string, approved: b
         <div className="flex gap-3 mt-6">
           <button 
             onClick={() => onVerify(user.id, true)}
-            className="px-6 py-2 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 flex items-center gap-2 transition-colors shadow-sm hover:shadow-md"
+            className="flex-1 md:flex-none px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 flex items-center justify-center gap-2 transition-colors shadow-sm hover:shadow-md active:scale-95"
           >
             <CheckCircle2 size={18} /> Approve
           </button>
           <button 
             onClick={() => onVerify(user.id, false)}
-            className="px-6 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 flex items-center gap-2 transition-all"
+            className="flex-1 md:flex-none px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 flex items-center justify-center gap-2 transition-all active:scale-95"
           >
             <XCircle size={18} /> Reject
           </button>
@@ -82,9 +81,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [recentTxns, setRecentTxns] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'USERS' | 'VERIFICATIONS' | 'REPORTS' | 'SETTINGS'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'USERS' | 'COLLEGES' | 'VERIFICATIONS' | 'REPORTS' | 'SETTINGS'>('OVERVIEW');
   const [loading, setLoading] = useState(false);
-  const [newAdminCode, setNewAdminCode] = useState('');
+  const [colleges, setColleges] = useState<College[]>([]);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
+  // Settings State
+  const [appSettings, setAppSettings] = useState({
+    admin_signup_code: '',
+    global_banner_text: '',
+    global_banner_active: 'false',
+    transaction_fee_percent: '5',
+    maintenance_mode: 'false'
+  });
+  
+  // Modules State
+  const [moduleFlags, setModuleFlags] = useState<Record<string, boolean>>({
+    'BUY': true, 'SELL': true, 'RENT': true, 'SHARE': true, 'SWAP': true, 'EARN': true, 'REQUEST': true
+  });
+
+  // College Add/Edit State
+  const [newCollege, setNewCollege] = useState({ id: '', name: '', domain: '', latitude: '', longitude: '' });
+  const [isEditingCollege, setIsEditingCollege] = useState(false);
+
   const { showToast } = useToast();
   
   // User Management State
@@ -96,7 +115,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   useEffect(() => {
     loadData();
     const subscription = api.subscribeToAdminEvents(() => {
-       // Debounce refresh to avoid flickering
        setTimeout(() => loadData(), 500);
     });
     return () => { subscription.unsubscribe(); }
@@ -122,6 +140,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         const { users, count } = await api.adminGetAllUsers(usersPage, USERS_PER_PAGE, userSearch);
         setAllUsers(users);
         setUsersTotal(count);
+      } else if (activeTab === 'COLLEGES') {
+        const data = await api.getColleges();
+        setColleges(data);
+      } else if (activeTab === 'SETTINGS') {
+        const configs = await api.getAllAppConfigs();
+        setAppSettings(prev => ({ ...prev, ...configs }));
+        if (configs['active_modules']) {
+           try { setModuleFlags(JSON.parse(configs['active_modules'])); } catch {}
+        }
       }
     } catch (e) {
       console.error(e);
@@ -138,7 +165,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       showToast(approve ? "User Verified Successfully" : "User Rejected", 'success');
     } catch (e: any) {
       console.error("Verification failed", e);
-      showToast(`Action failed: ${e.message || JSON.stringify(e)}`, 'error');
+      showToast(`Action failed: ${e.message}`, 'error');
     }
   };
 
@@ -146,11 +173,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     if (!window.confirm(currentStatus ? "Unban this user?" : "Ban this user? They will effectively be locked out.")) return;
     try {
       await api.adminBanUser(userId, !currentStatus);
-      // Optimistic update
       setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, banned: !currentStatus } : u));
       showToast(currentStatus ? "User Unbanned" : "User Banned", 'success');
     } catch (e) {
-      console.error(e);
       showToast("Failed to update ban status", 'error');
     }
   };
@@ -162,75 +187,126 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       setReports(prev => prev.filter(r => r.id !== reportId));
       showToast("Report Resolved", 'success');
     } catch (e) {
-      console.error("Report resolution failed", e);
       showToast("Failed to resolve report", 'error');
     }
   };
 
-  const handleUpdateCode = async () => {
-    if (!newAdminCode) return;
+  const handleSaveSetting = async (key: string, value: string) => {
     try {
-      await api.updateAdminCode(newAdminCode);
-      showToast("Admin Code Updated Successfully!", 'success');
-      setNewAdminCode('');
+      await api.updateAppConfig(key, value);
+      showToast("Setting Saved", 'success');
     } catch (e) {
-      showToast("Failed to update code.", 'error');
+      showToast("Failed to save setting", 'error');
+    }
+  };
+
+  const handleSaveModules = async (newFlags: Record<string, boolean>) => {
+     setModuleFlags(newFlags);
+     try {
+        await api.updateAppConfig('active_modules', JSON.stringify(newFlags));
+     } catch (e) { showToast("Failed to save modules", 'error'); }
+  };
+
+  const handleSaveCollege = async () => {
+    if (!newCollege.name || !newCollege.domain) return;
+    try {
+      const collegeData = {
+        name: newCollege.name,
+        domain: newCollege.domain,
+        latitude: parseFloat(newCollege.latitude) || 0,
+        longitude: parseFloat(newCollege.longitude) || 0
+      };
+
+      if (newCollege.id) {
+         await api.updateCollege(newCollege.id, collegeData);
+         showToast("College Updated", 'success');
+      } else {
+         await api.addCollege(collegeData);
+         showToast("College Added!", 'success');
+      }
+      
+      setNewCollege({ id: '', name: '', domain: '', latitude: '', longitude: '' });
+      setIsEditingCollege(false);
+      loadData();
+    } catch (e) {
+      showToast("Failed to save college", 'error');
+    }
+  };
+
+  const handleEditCollege = (college: College) => {
+     setNewCollege({
+       id: college.id,
+       name: college.name,
+       domain: college.domain,
+       latitude: college.latitude.toString(),
+       longitude: college.longitude.toString()
+     });
+     setIsEditingCollege(true);
+     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeleteCollege = async (id: string) => {
+    if (!confirm("Delete this college? This may affect users.")) return;
+    try {
+      await api.deleteCollege(id);
+      setColleges(prev => prev.filter(c => c.id !== id));
+      showToast("College deleted", 'success');
+    } catch (e) {
+      showToast("Failed to delete", 'error');
     }
   };
 
   const handleUserSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setUserSearch(e.target.value);
-    setUsersPage(0); // Reset page on search
+    setUsersPage(0);
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex font-sans">
+    <div className="min-h-screen bg-slate-100 flex font-sans overflow-hidden">
+      {/* Mobile Sidebar Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-20 md:hidden backdrop-blur-sm transition-opacity" 
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-64 bg-slate-900 text-white flex flex-col fixed h-full z-20 shadow-2xl glass-dark">
-        <div className="p-6 border-b border-slate-800">
+      <div className={`
+        fixed inset-y-0 left-0 z-30 w-64 bg-slate-900 text-white flex flex-col shadow-2xl glass-dark
+        transform transition-transform duration-300 ease-in-out
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+      `}>
+        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
           <h1 className="text-2xl font-bold flex items-center gap-2 tracking-tight">
             <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center text-slate-900 font-black text-lg">S</div>
             Admin
           </h1>
+          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-white">
+            <X size={24} />
+          </button>
         </div>
-        <nav className="flex-1 p-4 space-y-2">
-          <button 
-            onClick={() => setActiveTab('OVERVIEW')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'OVERVIEW' ? 'bg-slate-800 text-white shadow-lg shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-          >
-            <div className={`p-1.5 rounded-lg ${activeTab === 'OVERVIEW' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-blue-400'}`}><Activity size={18} /></div>
-            Analytics
-          </button>
-          <button 
-            onClick={() => setActiveTab('USERS')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'USERS' ? 'bg-slate-800 text-white shadow-lg shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-          >
-            <div className={`p-1.5 rounded-lg ${activeTab === 'USERS' ? 'bg-purple-500 text-white' : 'bg-slate-800 text-purple-400'}`}><Users size={18} /></div>
-            All Users
-          </button>
-          <button 
-            onClick={() => setActiveTab('VERIFICATIONS')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'VERIFICATIONS' ? 'bg-slate-800 text-white shadow-lg shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-          >
-            <div className={`p-1.5 rounded-lg ${activeTab === 'VERIFICATIONS' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-orange-400'}`}><ShieldCheck size={18} /></div>
-            Verifications
-            {pendingUsers.length > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{pendingUsers.length}</span>}
-          </button>
-          <button 
-            onClick={() => setActiveTab('REPORTS')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'REPORTS' ? 'bg-slate-800 text-white shadow-lg shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-          >
-            <div className={`p-1.5 rounded-lg ${activeTab === 'REPORTS' ? 'bg-red-500 text-white' : 'bg-slate-800 text-red-400'}`}><Flag size={18} /></div>
-            Reports
-            {reports.length > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{reports.length}</span>}
-          </button>
-          <button 
-            onClick={() => setActiveTab('SETTINGS')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'SETTINGS' ? 'bg-slate-800 text-white shadow-lg shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-          >
-            <div className={`p-1.5 rounded-lg ${activeTab === 'SETTINGS' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400'}`}><Settings size={18} /></div>
-            Settings
-          </button>
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          {[
+            { id: 'OVERVIEW', label: 'Analytics', icon: Activity, color: 'bg-blue-500', text: 'text-blue-400' },
+            { id: 'USERS', label: 'All Users', icon: Users, color: 'bg-purple-500', text: 'text-purple-400' },
+            { id: 'COLLEGES', label: 'Colleges', icon: School, color: 'bg-emerald-500', text: 'text-emerald-400' },
+            { id: 'VERIFICATIONS', label: 'Verifications', icon: ShieldCheck, color: 'bg-orange-500', text: 'text-orange-400', count: pendingUsers.length },
+            { id: 'REPORTS', label: 'Reports', icon: Flag, color: 'bg-red-500', text: 'text-red-400', count: reports.length },
+            { id: 'SETTINGS', label: 'System', icon: Settings, color: 'bg-slate-600', text: 'text-slate-400' },
+          ].map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => { setActiveTab(item.id as any); setIsMobileMenuOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === item.id ? 'bg-slate-800 text-white shadow-lg shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+            >
+              <div className={`p-1.5 rounded-lg ${activeTab === item.id ? item.color + ' text-white' : 'bg-slate-800 ' + item.text}`}>
+                <item.icon size={18} />
+              </div>
+              {item.label}
+              {item.count ? <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{item.count}</span> : null}
+            </button>
+          ))}
         </nav>
         <div className="p-4 border-t border-slate-800">
           <button onClick={signOut} className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-xl transition-colors">
@@ -240,19 +316,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       </div>
 
       {/* Content */}
-      <main className="flex-1 ml-64 p-8 overflow-y-auto">
-        <header className="flex justify-between items-center mb-8 animate-fade-in">
-          <div>
-            <h2 className="text-3xl font-black text-slate-800 tracking-tight">
-              {activeTab === 'OVERVIEW' && 'Platform Analytics'}
-              {activeTab === 'USERS' && 'User Management'}
-              {activeTab === 'VERIFICATIONS' && 'Pending Approvals'}
-              {activeTab === 'REPORTS' && 'Content Moderation'}
-              {activeTab === 'SETTINGS' && 'System Settings'}
-            </h2>
-            <p className="text-slate-500 mt-1">Manage the platform and ensure community safety.</p>
+      <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto h-screen w-full">
+        {/* Header */}
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 animate-fade-in">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="md:hidden p-2 bg-white rounded-xl shadow-sm border border-slate-200 text-slate-600 hover:text-slate-900"
+            >
+              <Menu size={24} />
+            </button>
+            <div>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">
+                {activeTab === 'OVERVIEW' && 'Platform Analytics'}
+                {activeTab === 'USERS' && 'User Management'}
+                {activeTab === 'COLLEGES' && 'Campus Network'}
+                {activeTab === 'VERIFICATIONS' && 'Pending Approvals'}
+                {activeTab === 'REPORTS' && 'Content Moderation'}
+                {activeTab === 'SETTINGS' && 'System Settings'}
+              </h2>
+              <p className="text-slate-500 text-sm mt-1 hidden md:block">Manage the platform and ensure community safety.</p>
+            </div>
           </div>
-          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+          
+          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200 self-end md:self-auto">
             <div className="text-right">
                <p className="text-sm font-bold text-slate-800">{user.name}</p>
                <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Super Admin</p>
@@ -264,11 +351,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         {activeTab === 'OVERVIEW' && (
           <div className="space-y-6 animate-slide-up">
             {/* Top Stats Cards */}
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between group hover:shadow-md transition-all">
                  <div>
                    <p className="text-slate-500 text-xs font-bold uppercase mb-1">Total Users</p>
-                   <p className="text-4xl font-bold text-slate-800">{loading ? '...' : stats.users}</p>
+                   <p className="text-3xl md:text-4xl font-bold text-slate-800">{loading ? '...' : stats.users}</p>
                  </div>
                  <div className="w-14 h-14 bg-blue-50 text-blue-500 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
                     <Users size={28} />
@@ -277,16 +364,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between group hover:shadow-md transition-all">
                  <div>
                    <p className="text-slate-500 text-xs font-bold uppercase mb-1">Active Listings</p>
-                   <p className="text-4xl font-bold text-slate-800">{loading ? '...' : stats.items}</p>
+                   <p className="text-3xl md:text-4xl font-bold text-slate-800">{loading ? '...' : stats.items}</p>
                  </div>
                  <div className="w-14 h-14 bg-orange-50 text-orange-500 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
                     <ShoppingBag size={28} />
                  </div>
                </div>
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between group hover:shadow-md transition-all">
+               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between group hover:shadow-md transition-all sm:col-span-2 lg:col-span-1">
                  <div>
                    <p className="text-slate-500 text-xs font-bold uppercase mb-1">Platform GMV</p>
-                   <p className="text-4xl font-bold text-slate-800">${loading ? '...' : stats.gmv.toLocaleString()}</p>
+                   <p className="text-3xl md:text-4xl font-bold text-slate-800">${loading ? '...' : stats.gmv.toLocaleString()}</p>
                  </div>
                  <div className="w-14 h-14 bg-green-50 text-green-500 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
                     <DollarSign size={28} />
@@ -295,9 +382,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             </div>
 
             {/* Charts Section */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                {/* Revenue & User Growth Chart */}
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-[400px] flex flex-col w-full min-w-0">
+               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-[350px] md:h-[400px] flex flex-col w-full min-w-0">
                   <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2"><TrendingUp size={20} className="text-green-500"/> Growth (Last 7 Days)</h3>
                   <div className="flex-1 w-full min-h-0">
                     <ResponsiveContainer width="100%" height="100%">
@@ -321,7 +408,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                </div>
 
                {/* Category Distribution */}
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-[400px] flex flex-col w-full min-w-0">
+               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-[350px] md:h-[400px] flex flex-col w-full min-w-0">
                   <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2"><ShoppingBag size={20} className="text-purple-500"/> Inventory Mix</h3>
                   <div className="flex-1 w-full min-h-0">
                     <ResponsiveContainer width="100%" height="100%">
@@ -343,7 +430,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2"><Clock size={20} className="text-blue-500"/> Recent Transactions</h3>
                <div className="overflow-x-auto">
-                 <table className="w-full text-sm text-left">
+                 <table className="w-full text-sm text-left whitespace-nowrap">
                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
                      <tr>
                        <th className="px-6 py-3 rounded-l-lg">Item</th>
@@ -380,12 +467,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           </div>
         )}
 
-        {/* ... Rest of tabs (USERS, VERIFICATIONS, REPORTS, SETTINGS) are unchanged ... */}
+        {/* --- USERS TAB --- */}
         {activeTab === 'USERS' && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-slide-up">
-             {/* ... User Management Logic ... */}
-             <div className="p-4 border-b border-slate-100 flex items-center gap-4 bg-slate-50/50">
-                <div className="relative flex-1">
+             <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row items-center gap-4 bg-slate-50/50">
+                <div className="relative flex-1 w-full">
                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                    <input 
                      type="text" 
@@ -395,7 +481,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                      className="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-slate-900 transition-all shadow-sm"
                    />
                 </div>
-                <div className="text-xs text-slate-500 font-bold bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm">
+                <div className="text-xs text-slate-500 font-bold bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm w-full md:w-auto text-center">
                    Total Records: {usersTotal}
                 </div>
              </div>
@@ -407,7 +493,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                 </div>
              ) : (
                <div className="overflow-x-auto">
-                 <table className="w-full text-sm text-left">
+                 <table className="w-full text-sm text-left whitespace-nowrap">
                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
                      <tr>
                        <th className="px-6 py-4">User</th>
@@ -482,6 +568,96 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           </div>
         )}
 
+        {/* --- COLLEGES TAB --- */}
+        {activeTab === 'COLLEGES' && (
+          <div className="space-y-6 animate-slide-up">
+             <div className="flex justify-between items-center">
+                <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200 text-sm font-bold text-slate-600">
+                   {colleges.length} Active Campuses
+                </div>
+                <button 
+                  onClick={() => { setIsEditingCollege(!isEditingCollege); setNewCollege({ id: '', name: '', domain: '', latitude: '', longitude: '' }); }}
+                  className="px-6 py-2 bg-slate-900 text-white rounded-xl font-bold flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                >
+                   <Plus size={18} /> <span className="hidden md:inline">Add College</span>
+                </button>
+             </div>
+
+             {isEditingCollege && (
+                <div className="bg-white p-6 rounded-2xl shadow-md border border-indigo-100 animate-in fade-in slide-in-from-top-4">
+                   <h3 className="font-bold text-slate-800 mb-4">{newCollege.id ? 'Edit Campus' : 'Add New Campus'}</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <input 
+                        type="text" 
+                        placeholder="University Name" 
+                        className="p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                        value={newCollege.name}
+                        onChange={e => setNewCollege({...newCollege, name: e.target.value})}
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="Email Domain (e.g., stanford.edu)" 
+                        className="p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                        value={newCollege.domain}
+                        onChange={e => setNewCollege({...newCollege, domain: e.target.value})}
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="Latitude" 
+                        className="p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                        value={newCollege.latitude}
+                        onChange={e => setNewCollege({...newCollege, latitude: e.target.value})}
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="Longitude" 
+                        className="p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                        value={newCollege.longitude}
+                        onChange={e => setNewCollege({...newCollege, longitude: e.target.value})}
+                      />
+                   </div>
+                   <div className="flex justify-end gap-3">
+                      <button onClick={() => setIsEditingCollege(false)} className="px-4 py-2 text-slate-500 font-bold">Cancel</button>
+                      <button onClick={handleSaveCollege} className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold">{newCollege.id ? 'Update' : 'Save'}</button>
+                   </div>
+                </div>
+             )}
+
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {colleges.map(college => (
+                   <div key={college.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow group relative">
+                      <div className="flex justify-between items-start mb-2">
+                         <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">
+                            <School size={20} />
+                         </div>
+                         <div className="flex gap-2">
+                           <button 
+                             onClick={() => handleEditCollege(college)}
+                             className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                           >
+                              <Edit2 size={16} />
+                           </button>
+                           <button 
+                             onClick={() => handleDeleteCollege(college.id)}
+                             className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                           >
+                              <Trash2 size={16} />
+                           </button>
+                         </div>
+                      </div>
+                      <h4 className="font-bold text-slate-800 text-lg mb-1">{college.name}</h4>
+                      <p className="text-xs text-slate-500 font-mono bg-slate-50 px-2 py-1 rounded inline-block">@{college.domain}</p>
+                      
+                      <div className="mt-4 pt-4 border-t border-slate-50 flex gap-4 text-xs text-slate-400">
+                         <span className="flex items-center gap-1"><Globe size={12}/> {college.latitude.toFixed(4)}</span>
+                         <span>{college.longitude.toFixed(4)}</span>
+                      </div>
+                   </div>
+                ))}
+             </div>
+          </div>
+        )}
+
         {activeTab === 'VERIFICATIONS' && (
           <div className="space-y-4 animate-slide-up">
             {pendingUsers.length === 0 && !loading && (
@@ -513,7 +689,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
              )}
              
              {reports.map(r => (
-               <div key={r.id} className="bg-white p-6 rounded-2xl shadow-sm border border-red-100 flex gap-6 hover:shadow-md transition-shadow">
+               <div key={r.id} className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-red-100 flex flex-col md:flex-row gap-6 hover:shadow-md transition-shadow">
                  <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center shrink-0">
                     <AlertTriangle size={32} />
                  </div>
@@ -528,19 +704,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                            Reported Item: <span className="font-bold text-slate-900">{r.item?.title || 'Unknown/Deleted Item'}</span>
                         </p>
                       </div>
-                      <span className="text-xs text-slate-400 font-medium">{new Date(r.createdAt).toLocaleDateString()}</span>
+                      <span className="text-xs text-slate-400 font-medium">{new Date(r.createdAt).toLocaleDateString()}</span
                    </div>
                    
                    <div className="flex gap-3 mt-4">
                      <button 
                        onClick={() => handleResolveReport(r.id, 'DELETE_ITEM', r.itemId)}
-                       className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 flex items-center gap-2 shadow-sm"
+                       className="flex-1 md:flex-none px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 flex items-center justify-center gap-2 shadow-sm"
                      >
                        <Trash2 size={16} /> Delete Item & Resolve
                      </button>
                      <button 
                        onClick={() => handleResolveReport(r.id, 'DISMISS')}
-                       className="px-4 py-2 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-sm font-bold hover:bg-white hover:border-slate-300 transition-colors"
+                       className="flex-1 md:flex-none px-4 py-2 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-sm font-bold hover:bg-white hover:border-slate-300 transition-colors"
                      >
                        Dismiss
                      </button>
@@ -552,36 +728,131 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         )}
 
         {activeTab === 'SETTINGS' && (
-           <div className="max-w-xl bg-white p-8 rounded-2xl shadow-sm border border-slate-200 animate-slide-up">
-              <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2">
-                 <Settings size={24} className="text-slate-400" /> Security Settings
-              </h3>
-              <div className="space-y-6">
-                <div>
-                   <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Admin Signup Code</label>
-                   <div className="flex gap-3">
-                      <div className="relative flex-1">
-                         <Key size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                         <input 
-                           type="text" 
-                           value={newAdminCode}
-                           onChange={(e) => setNewAdminCode(e.target.value)}
-                           placeholder="Enter new secret code"
-                           className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 font-mono text-sm"
-                         />
-                      </div>
-                      <button 
-                        onClick={handleUpdateCode}
-                        disabled={!newAdminCode}
-                        className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50 transition-colors"
-                      >
-                        Update
-                      </button>
-                   </div>
-                   <p className="text-xs text-slate-400 mt-2">
-                      <span className="text-red-500 font-bold">Warning:</span> Changing this code will prevent new admins from registering until they know the new code.
-                   </p>
-                </div>
+           <div className="max-w-2xl space-y-6 animate-slide-up">
+              
+              {/* Feature Flags Card */}
+              <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
+                 <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2">
+                    <Layers size={24} className="text-slate-400" /> Module Configuration
+                 </h3>
+                 <p className="text-sm text-slate-500 mb-6">Enable or disable specific features for all users.</p>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {Object.keys(moduleFlags).map((mod) => (
+                       <div key={mod} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                          <span className="font-bold text-slate-700 text-sm">{mod}</span>
+                          <button 
+                            onClick={() => handleSaveModules({...moduleFlags, [mod]: !moduleFlags[mod]})}
+                            className={`p-1 rounded-full transition-colors ${moduleFlags[mod] ? 'text-green-500' : 'text-slate-300'}`}
+                          >
+                             {moduleFlags[mod] ? <ToggleRight size={32} fill="currentColor" /> : <ToggleLeft size={32} />}
+                          </button>
+                       </div>
+                    ))}
+                 </div>
+              </div>
+
+              {/* Security Card */}
+              <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
+                 <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2">
+                    <Key size={24} className="text-slate-400" /> Admin Access
+                 </h3>
+                 <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Admin Signup Code</label>
+                    <div className="flex gap-3">
+                       <div className="relative flex-1">
+                          <input 
+                            type="text" 
+                            value={appSettings.admin_signup_code}
+                            onChange={(e) => setAppSettings(prev => ({ ...prev, admin_signup_code: e.target.value }))}
+                            placeholder="Enter secret code"
+                            className="w-full pl-4 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 font-mono text-sm"
+                          />
+                       </div>
+                       <button 
+                         onClick={() => handleSaveSetting('admin_signup_code', appSettings.admin_signup_code)}
+                         className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors"
+                       >
+                         Update
+                       </button>
+                    </div>
+                 </div>
+              </div>
+
+              {/* Global Config Card */}
+              <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
+                 <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2">
+                    <Settings size={24} className="text-slate-400" /> App Configuration
+                 </h3>
+                 
+                 <div className="space-y-6">
+                    <div>
+                       <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Announcement Banner</label>
+                       <div className="flex gap-3 mb-2">
+                          <input 
+                            type="text" 
+                            value={appSettings.global_banner_text}
+                            onChange={(e) => setAppSettings(prev => ({ ...prev, global_banner_text: e.target.value }))}
+                            placeholder="e.g. System maintenance scheduled for tonight"
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          />
+                          <button 
+                            onClick={() => handleSaveSetting('global_banner_text', appSettings.global_banner_text)}
+                            className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl font-bold hover:bg-slate-50"
+                          >
+                            <Save size={18} />
+                          </button>
+                       </div>
+                       <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={appSettings.global_banner_active === 'true'}
+                            onChange={(e) => {
+                               const val = e.target.checked ? 'true' : 'false';
+                               setAppSettings(prev => ({...prev, global_banner_active: val}));
+                               handleSaveSetting('global_banner_active', val);
+                            }}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                          />
+                          Show Banner on Home Screen
+                       </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                       <div>
+                          <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Transaction Fee (%)</label>
+                          <div className="relative">
+                             <input 
+                               type="number" 
+                               value={appSettings.transaction_fee_percent}
+                               onChange={(e) => setAppSettings(prev => ({ ...prev, transaction_fee_percent: e.target.value }))}
+                               onBlur={() => handleSaveSetting('transaction_fee_percent', appSettings.transaction_fee_percent)}
+                               className="w-full px-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-green-500 text-sm font-bold"
+                             />
+                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">%</span>
+                          </div>
+                       </div>
+                       
+                       <div className="flex flex-col justify-end">
+                          <label className="flex items-center gap-2 p-3 border border-red-100 bg-red-50 rounded-xl cursor-pointer hover:bg-red-100 transition-colors">
+                             <input 
+                               type="checkbox" 
+                               checked={appSettings.maintenance_mode === 'true'}
+                               onChange={(e) => {
+                                  const val = e.target.checked ? 'true' : 'false';
+                                  setAppSettings(prev => ({...prev, maintenance_mode: val}));
+                                  handleSaveSetting('maintenance_mode', val);
+                               }}
+                               className="w-5 h-5 rounded text-red-600 focus:ring-red-500"
+                             />
+                             <div>
+                                <span className="block text-red-700 font-bold text-sm">Maintenance Mode</span>
+                                <span className="block text-red-500 text-[10px] font-bold uppercase tracking-wider">Locks All Actions</span>
+                             </div>
+                          </label>
+                       </div>
+                    </div>
+                 </div>
               </div>
            </div>
         )}

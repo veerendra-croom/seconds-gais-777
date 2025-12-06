@@ -115,9 +115,6 @@ export const api = {
     if (filters) {
       if (filters.minPrice !== undefined && filters.minPrice > 0) query = query.gte('price', filters.minPrice);
       if (filters.maxPrice !== undefined && filters.maxPrice > 0) query = query.lte('price', filters.maxPrice);
-      // Note: Condition filtering would require a 'condition' column in DB or JSON filtering. 
-      // Assuming 'description' contains condition or we skip strictly for MVP. 
-      // Ideally, add .in('condition', filters.condition) if column existed.
     }
 
     // Explicitly exclude items from banned users
@@ -165,7 +162,6 @@ export const api = {
   },
 
   getTrendingItems: async (): Promise<Item[]> => {
-    // Just fetch most recent 4 items for demo
     return await api.getItems('BUY', 'All', undefined, undefined, 0, 4);
   },
 
@@ -251,25 +247,19 @@ export const api = {
 
   updateItem: async (itemId: string, updates: any): Promise<void> => {
     const dbUpdates = { ...updates };
-    
-    // Map 'images' array to 'image' JSON string for DB
     if (dbUpdates.images) {
       dbUpdates.image = JSON.stringify(dbUpdates.images);
-      delete dbUpdates.images; // Remove key that doesn't exist in DB
+      delete dbUpdates.images;
     }
-    
     const { error } = await supabase.from('items').update(dbUpdates).eq('id', itemId);
     if (error) throw error;
   },
 
   deleteItem: async (itemId: string): Promise<void> => {
-    // 1. Fetch item to get images
     const { data: item } = await supabase.from('items').select('image').eq('id', itemId).single();
-    
     if (item && item.image) {
       const images = parseImages(item.image);
       const filesToRemove = images.map(url => {
-        // Extract filename from URL: .../items/filename.jpg
         const parts = url.split('/');
         return parts[parts.length - 1];
       }).filter(Boolean);
@@ -278,44 +268,31 @@ export const api = {
         await supabase.storage.from('items').remove(filesToRemove);
       }
     }
-
-    // 2. Delete row
     const { error } = await supabase.from('items').delete().eq('id', itemId);
     if (error) throw error;
   },
 
   uploadImage: async (file: File): Promise<string | null> => {
     try {
-      // 1. Compress Image
       let fileToUpload: File | Blob = file;
-      if (file.size > 1024 * 1024) { // If > 1MB
+      if (file.size > 1024 * 1024) { 
          try {
            fileToUpload = await compressImage(file);
          } catch (e) {
            console.warn("Compression failed, using original file", e);
          }
       }
-
-      // Create a unique file name with timestamp to avoid collision
       const fileExt = file.name.split('.').pop() || 'jpg';
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
       const filePath = `${fileName}`;
 
-      // 2. Try Upload
-      // We use 'items' bucket as per standard SQL
-      const { error: uploadError } = await supabase.storage.from('items').upload(filePath, fileToUpload, {
-        upsert: false // Safer for new files
-      });
+      const { error: uploadError } = await supabase.storage.from('items').upload(filePath, fileToUpload, { upsert: false });
 
-      if (uploadError) {
-        console.error("Supabase Storage Error:", uploadError);
-        return null;
-      }
+      if (uploadError) return null;
 
       const { data } = supabase.storage.from('items').getPublicUrl(filePath);
       return data.publicUrl;
     } catch (e) {
-      console.error("Upload Exception:", e);
       return null;
     }
   },
@@ -369,7 +346,6 @@ export const api = {
   // --- USER ANALYTICS ---
   
   getUserEarningsHistory: async (userId: string): Promise<any[]> => {
-    // 1. Get transactions where I am the seller and status is completed
     const { data } = await supabase
       .from('transactions')
       .select('amount, created_at')
@@ -379,11 +355,9 @@ export const api = {
 
     if (!data) return [];
 
-    // 2. Aggregate by Month
     const monthlyData: Record<string, number> = {};
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     
-    // Initialize last 6 months with 0
     const today = new Date();
     for (let i = 5; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
@@ -393,7 +367,6 @@ export const api = {
 
     data.forEach((txn: any) => {
       const d = new Date(txn.created_at);
-      // Only process if within the last 6 months roughly
       const key = monthNames[d.getMonth()];
       if (monthlyData.hasOwnProperty(key)) {
         monthlyData[key] += txn.amount;
@@ -520,13 +493,11 @@ export const api = {
   },
 
   confirmOrder: async (transactionId: string, userId: string): Promise<void> => {
-     // Call RPC to complete order and transfer funds
      const { error } = await supabase.rpc('complete_order', { p_txn_id: transactionId, p_user_id: userId });
      if (error) throw error;
   },
 
   createTransaction: async (data: any): Promise<void> => {
-     // Call RPC to atomically lock item and create transaction
      const { error } = await supabase.rpc('create_order', { 
         p_buyer_id: data.buyerId,
         p_seller_id: data.sellerId,
@@ -598,7 +569,6 @@ export const api = {
   // --- MESSAGING ---
 
   getConversations: async (userId: string): Promise<Conversation[]> => {
-     // Fetch all messages involving the user
      const { data: messages, error } = await supabase
       .from('messages')
       .select(`*, sender:sender_id (full_name, avatar_url), receiver:receiver_id (full_name, avatar_url), item:item_id (title, image)`)
@@ -698,14 +668,12 @@ export const api = {
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${userId}` }, 
       (payload) => {
-         // Echo back own messages if needed for multi-device sync
       })
       .subscribe();
   },
 
   blockUser: async (blockerId: string, blockedId: string): Promise<void> => {
      const { error } = await supabase.from('blocked_users').insert({ blocker_id: blockerId, blocked_id: blockedId });
-     // Ignore duplicates
      if (error && error.code !== '23505') throw error;
   },
 
@@ -732,24 +700,33 @@ export const api = {
      return data || [];
   },
 
+  addCollege: async (college: Omit<College, 'id'>): Promise<void> => {
+     const { error } = await supabase.from('colleges').insert(college);
+     if (error) throw error;
+  },
+
+  updateCollege: async (id: string, updates: Partial<College>): Promise<void> => {
+     const { error } = await supabase.from('colleges').update(updates).eq('id', id);
+     if (error) throw error;
+  },
+
+  deleteCollege: async (id: string): Promise<void> => {
+     const { error } = await supabase.from('colleges').delete().eq('id', id);
+     if (error) throw error;
+  },
+
   sendCollegeVerification: async (email: string): Promise<string> => {
-     // REAL IMPLEMENTATION using DB-backed OTP
      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-     
-     // 1. Store code in DB
      const { error } = await supabase.from('verification_codes').insert({
         email: email,
         code: otp
      });
      if (error) throw error;
-
-     // 2. Return code for Demo (In real prod, this would only return void and send email)
      console.log(`%c[EMAILING SERVICE] Verification Code for ${email}: ${otp}`, 'color: #0ea5e9; font-weight: bold; font-size: 14px;');
      return otp;
   },
 
   verifyCollegeEmail: async (userId: string, email: string, otp: string): Promise<void> => {
-     // 1. Validate Code against DB
      const { data, error } = await supabase.from('verification_codes')
        .select('*')
        .eq('email', email)
@@ -761,27 +738,22 @@ export const api = {
 
      if (!data) throw new Error("Invalid or expired verification code.");
 
-     // 2. Update Profile
      await supabase.from('profiles').update({ 
         college_email: email,
         college_email_verified: true,
         verification_status: 'PENDING'
      }).eq('id', userId);
 
-     // 3. Cleanup used code
      await supabase.from('verification_codes').delete().eq('id', data.id);
   },
 
   adminGetVerificationImage: async (userId: string): Promise<string | null> => {
-    // Dynamically search for the file since the extension is unknown (jpg/png)
     const { data, error } = await supabase.storage.from('verifications').list('', {
       search: `${userId}-student-id`
     });
 
     if (data && data.length > 0) {
       const fileName = data[0].name;
-      // Use createSignedUrl for security (valid for 1 hour) instead of public URL
-      // This ensures student IDs are not publicly accessible
       const { data: urlData } = await supabase.storage.from('verifications').createSignedUrl(fileName, 3600);
       return urlData?.signedUrl || null;
     }
@@ -796,21 +768,29 @@ export const api = {
      return data?.value === code;
   },
 
-  updateAdminCode: async (code: string): Promise<void> => {
-     await supabase.from('app_config').upsert({ key: 'admin_signup_code', value: code });
+  updateAppConfig: async (key: string, value: string): Promise<void> => {
+     await supabase.from('app_config').upsert({ key, value });
+  },
+
+  getAppConfig: async (key: string): Promise<string | null> => {
+     const { data } = await supabase.from('app_config').select('value').eq('key', key).maybeSingle();
+     return data?.value || null;
+  },
+
+  getAllAppConfigs: async (): Promise<Record<string, string>> => {
+     const { data } = await supabase.from('app_config').select('key, value');
+     const configs: Record<string, string> = {};
+     data?.forEach(row => configs[row.key] = row.value);
+     return configs;
   },
 
   adminGetStats: async (): Promise<any> => {
-     // REAL AGGREGATION: Get count of users, items, and sum of transactions
      const [users, items, transactions] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
         supabase.from('items').select('id', { count: 'exact', head: true }),
         supabase.from('transactions').select('amount')
      ]);
-     
-     // Calculate Real GMV from transaction rows
      const gmv = (transactions.data || []).reduce((sum, txn: any) => sum + (txn.amount || 0), 0);
-
      return { 
        users: users.count || 0, 
        items: items.count || 0, 
@@ -819,8 +799,6 @@ export const api = {
   },
 
   adminGetAnalytics: async (): Promise<any> => {
-     // REAL DATA FETCHING for Charts
-     // 1. Fetch transactions for the last 7 days
      const sevenDaysAgo = new Date();
      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
      
@@ -838,11 +816,9 @@ export const api = {
        .from('items')
        .select('category');
 
-     // Process for Chart: Group by Day
      const chartDataMap: Record<string, { sales: number, users: number }> = {};
      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
      
-     // Initialize last 7 days
      for (let i = 0; i < 7; i++) {
         const d = new Date();
         d.setDate(d.getDate() - i);
@@ -862,7 +838,6 @@ export const api = {
         if (chartDataMap[dayName]) chartDataMap[dayName].users += 1;
      });
 
-     // Process Category Data
      const categoryMap: Record<string, number> = {};
      categoryItems?.forEach((item: any) => {
         const cat = item.category || 'Other';
@@ -870,13 +845,12 @@ export const api = {
      });
 
      return {
-        chartData: Object.entries(chartDataMap).map(([name, val]) => ({ name, ...val })).reverse(), // Show oldest to newest left to right
+        chartData: Object.entries(chartDataMap).map(([name, val]) => ({ name, ...val })).reverse(), 
         categoryData: Object.entries(categoryMap).map(([name, value]) => ({ name, value }))
      };
   },
 
   adminGetRecentTransactions: async (): Promise<any[]> => {
-    // Properly join profiles for buyer/seller names and item for title
     const { data } = await supabase
       .from('transactions')
       .select('*, buyer:profiles!buyer_id(full_name), seller:profiles!seller_id(full_name), item:items(title)')
@@ -913,12 +887,7 @@ export const api = {
   },
 
   adminVerifyUser: async (userId: string, approve: boolean): Promise<void> => {
-     await supabase.from('profiles').update({
-        verified: approve,
-        // If rejected, maybe reset college email verified? For now just verified flag.
-     }).eq('id', userId);
-     
-     // Notify user
+     await supabase.from('profiles').update({ verified: approve }).eq('id', userId);
      await supabase.from('notifications').insert({
         user_id: userId,
         type: 'SYSTEM',
@@ -940,7 +909,6 @@ export const api = {
   },
 
   subscribeToAdminEvents: (callback: () => void) => {
-     // Subscribe to relevant tables for dashboard updates
      return supabase.channel('admin-dashboard')
        .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, callback)
        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, callback)
@@ -979,17 +947,12 @@ export const api = {
   },
 
   withdrawFunds: async (userId: string, amount: number): Promise<void> => {
-     // Decrement earnings
-     // This usually requires a transaction or RPC to be safe
      const { error } = await supabase.rpc('withdraw_funds', { p_user_id: userId, p_amount: amount });
      if (error) throw error;
   },
 
   deleteAccount: async (userId: string): Promise<void> => {
-     // RPC to handle cascading deletes if not set in DB
-     // Or rely on cascading foreign keys in Postgres
      await supabase.from('profiles').delete().eq('id', userId);
-     // Also sign out
      await supabase.auth.signOut();
   }
 };

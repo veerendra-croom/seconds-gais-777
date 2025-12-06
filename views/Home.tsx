@@ -15,7 +15,7 @@ interface HomeProps {
   onNotificationClick?: (notification: Notification) => void;
 }
 
-const modules = [
+const allModules = [
   { id: 'BUY', label: 'Buy', icon: ShoppingCart, color: 'bg-blue-500', gradient: 'from-blue-400 to-blue-600' },
   { id: 'SELL', label: 'Sell', icon: Tag, color: 'bg-green-500', gradient: 'from-green-400 to-green-600' },
   { id: 'RENT', label: 'Rent', icon: Clock, color: 'bg-orange-500', gradient: 'from-orange-400 to-orange-600' },
@@ -35,22 +35,45 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
   const [analyzingImage, setAnalyzingImage] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [enabledModules, setEnabledModules] = useState(allModules);
+  const [appBanner, setAppBanner] = useState('');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
 
   useEffect(() => {
-    const fetchTrending = async () => {
+    const fetchData = async () => {
       try {
-        const items = await api.getTrendingItems();
+        const [items, configs] = await Promise.all([
+           api.getTrendingItems(),
+           api.getAllAppConfigs()
+        ]);
         setTrendingItems(items);
+        
+        // Handle Global Banner
+        if (configs['global_banner_active'] === 'true' && configs['global_banner_text']) {
+           setAppBanner(configs['global_banner_text']);
+        }
+
+        // Handle Feature Flags
+        if (configs['active_modules']) {
+           try {
+              const activeMap = JSON.parse(configs['active_modules']);
+              const filtered = allModules.filter(m => activeMap[m.id] !== false); // Default true if missing
+              setEnabledModules(filtered);
+           } catch (e) {
+              console.error("Failed to parse module config", e);
+           }
+        }
+
       } catch (e) {
-        console.error("Failed to load trending items", e);
+        console.error("Failed to load home data", e);
       } finally {
         setLoading(false);
       }
     };
     
-    fetchTrending();
+    fetchData();
     fetchNotifications();
     
     // Subscribe to realtime notifications
@@ -188,8 +211,15 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
         </div>
       )}
 
+      {/* Global Announcement Banner */}
+      {appBanner && (
+        <div className="bg-indigo-600 text-white px-6 py-3 text-center text-sm font-bold shadow-sm animate-slide-up sticky top-0 z-40">
+           {appBanner}
+        </div>
+      )}
+
       {/* Premium Header */}
-      <header className="px-6 pt-12 pb-4 sticky top-0 md:static z-30 transition-all">
+      <header className={`px-6 pt-12 pb-4 ${appBanner ? 'md:pt-4' : 'sticky top-0 md:static'} z-30 transition-all`}>
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-3xl font-black text-slate-900 tracking-tighter">
@@ -300,7 +330,7 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
       <div className="px-6 mt-10">
         <h3 className="font-bold text-slate-900 mb-6 text-lg">Explore Campus</h3>
         <div className="grid grid-cols-4 md:grid-cols-7 gap-4">
-          {modules.map((mod, i) => {
+          {enabledModules.map((mod, i) => {
             const Icon = mod.icon;
             return (
               <button
