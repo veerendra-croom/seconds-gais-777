@@ -1,18 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
-import { Loader2, Mail, Lock, User, ArrowRight, CheckCircle2, AlertCircle, Key, ChevronLeft, Sparkles, Building2 } from 'lucide-react';
+import { Loader2, Mail, Lock, User, ArrowRight, CheckCircle2, AlertCircle, Key, ChevronLeft, Sparkles, Building2, HelpCircle } from 'lucide-react';
 import { api } from '../services/api';
-import { College } from '../types';
+import { College, ModuleType } from '../types';
 
 interface AuthViewProps {
   onSuccess: () => void;
   onBack: () => void;
+  onViewPage?: (page: ModuleType) => void;
 }
 
-export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
+export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack, onViewPage }) => {
+  const [viewState, setViewState] = useState<'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD'>('LOGIN');
   const [role, setRole] = useState<'STUDENT' | 'ADMIN'>('STUDENT');
-  const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -37,13 +38,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
     setMessage(null);
 
     try {
-      if (isLogin) {
+      if (viewState === 'LOGIN') {
         const { error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         });
         if (error) throw error;
-      } else {
+      } else if (viewState === 'REGISTER') {
         if (role === 'ADMIN') {
           if (!formData.adminCode) throw new Error("Admin Access Code is required.");
           const isValid = await api.checkAdminCode(formData.adminCode);
@@ -83,23 +84,19 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
           });
           onSuccess();
         }
+      } else if (viewState === 'FORGOT_PASSWORD') {
+         const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+           redirectTo: window.location.origin,
+         });
+         if (error) throw error;
+         setMessage("Password reset link sent to " + formData.email);
+         setViewState('LOGIN');
       }
       
     } catch (err: any) {
       setError(err.message || 'An error occurred');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    const email = prompt("Enter your email address to recover password:");
-    if (email) {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin,
-      });
-      if (error) alert("Error: " + error.message);
-      else alert("Password reset link sent to " + email);
     }
   };
 
@@ -119,7 +116,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
           <h2 className="text-2xl font-black text-slate-800 mb-2 tracking-tight">Check your inbox</h2>
           <p className="text-slate-500 mb-8 font-medium">{message}</p>
           <button 
-            onClick={() => { setMessage(null); setIsLogin(true); }}
+            onClick={() => { setMessage(null); setViewState('LOGIN'); }}
             className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:scale-95"
           >
             Back to Login
@@ -151,33 +148,35 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
           <div className="px-8 pt-10 pb-6 text-center">
             <div className="inline-flex items-center justify-center w-12 h-12 bg-slate-900 rounded-xl text-white font-bold text-xl mb-6 shadow-lg shadow-slate-900/20">S</div>
             <h1 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">
-              {isLogin ? 'Welcome Back' : 'Create Account'}
+              {viewState === 'LOGIN' ? 'Welcome Back' : viewState === 'REGISTER' ? 'Create Account' : 'Reset Password'}
             </h1>
             <p className="text-slate-500 font-medium">
-              {isLogin ? 'Enter your details to sign in.' : 'Join the verified student economy.'}
+              {viewState === 'LOGIN' ? 'Enter your details to sign in.' : viewState === 'REGISTER' ? 'Join the verified student economy.' : 'Enter your email to receive a reset link.'}
             </p>
           </div>
 
-          {/* Toggle Login/Register */}
-          <div className="px-8">
-            <div className="flex bg-slate-100/50 p-1.5 rounded-2xl relative">
-              <div 
-                className={`absolute inset-y-1.5 w-[calc(50%-6px)] bg-white rounded-xl shadow-sm transition-all duration-300 ease-out ${isLogin ? 'left-1.5' : 'left-[calc(50%+3px)]'}`}
-              ></div>
-              <button 
-                onClick={() => { setIsLogin(true); setError(null); }}
-                className={`flex-1 py-3 text-sm font-bold relative z-10 transition-colors ${isLogin ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                Sign In
-              </button>
-              <button 
-                onClick={() => { setIsLogin(false); setError(null); }}
-                className={`flex-1 py-3 text-sm font-bold relative z-10 transition-colors ${!isLogin ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                Register
-              </button>
+          {/* Toggle Login/Register (Hide on Forgot Password) */}
+          {viewState !== 'FORGOT_PASSWORD' && (
+            <div className="px-8">
+              <div className="flex bg-slate-100/50 p-1.5 rounded-2xl relative">
+                <div 
+                  className={`absolute inset-y-1.5 w-[calc(50%-6px)] bg-white rounded-xl shadow-sm transition-all duration-300 ease-out ${viewState === 'LOGIN' ? 'left-1.5' : 'left-[calc(50%+3px)]'}`}
+                ></div>
+                <button 
+                  onClick={() => { setViewState('LOGIN'); setError(null); }}
+                  className={`flex-1 py-3 text-sm font-bold relative z-10 transition-colors ${viewState === 'LOGIN' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Sign In
+                </button>
+                <button 
+                  onClick={() => { setViewState('REGISTER'); setError(null); }}
+                  className={`flex-1 py-3 text-sm font-bold relative z-10 transition-colors ${viewState !== 'LOGIN' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Register
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="p-8">
             {error && (
@@ -188,7 +187,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
             )}
 
             <form onSubmit={handleAuth} className="space-y-5">
-              {!isLogin && (
+              {viewState === 'REGISTER' && (
                 <>
                   <div className="flex gap-4">
                      <button
@@ -262,34 +261,36 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
                   <input 
                     type="email" 
                     required
-                    placeholder={isLogin ? "Email Address" : "Personal Email"}
+                    placeholder={viewState === 'LOGIN' ? "Email Address" : "Personal Email"}
                     className="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 font-medium"
                     value={formData.email}
                     onChange={e => setFormData({...formData, email: e.target.value})}
                   />
                 </div>
 
-                <div className="relative group">
-                  <Lock className="absolute left-4 top-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" size={20} />
-                  <input 
-                    type="password" 
-                    required
-                    placeholder="Password"
-                    className="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 font-medium"
-                    value={formData.password}
-                    onChange={e => setFormData({...formData, password: e.target.value})}
-                  />
-                </div>
+                {viewState !== 'FORGOT_PASSWORD' && (
+                  <div className="relative group">
+                    <Lock className="absolute left-4 top-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" size={20} />
+                    <input 
+                      type="password" 
+                      required
+                      placeholder="Password"
+                      className="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 font-medium"
+                      value={formData.password}
+                      onChange={e => setFormData({...formData, password: e.target.value})}
+                    />
+                  </div>
+                )}
               </div>
 
               <button 
                 type="submit" 
                 disabled={loading}
-                className={`w-full py-4 rounded-2xl font-bold shadow-xl transition-all flex items-center justify-center mt-6 text-white text-lg hover:-translate-y-0.5 active:scale-95 disabled:opacity-70 disabled:active:scale-100 ${role === 'ADMIN' && !isLogin ? 'bg-slate-900 hover:bg-slate-800 shadow-slate-900/30' : 'bg-gradient-to-r from-primary-600 to-primary-500 hover:to-primary-600 shadow-primary-500/30'}`}
+                className={`w-full py-4 rounded-2xl font-bold shadow-xl transition-all flex items-center justify-center mt-6 text-white text-lg hover:-translate-y-0.5 active:scale-95 disabled:opacity-70 disabled:active:scale-100 ${role === 'ADMIN' && viewState === 'REGISTER' ? 'bg-slate-900 hover:bg-slate-800 shadow-slate-900/30' : 'bg-gradient-to-r from-primary-600 to-primary-500 hover:to-primary-600 shadow-primary-500/30'}`}
               >
                 {loading ? <Loader2 className="animate-spin" /> : (
                   <>
-                    {isLogin ? 'Sign In' : 'Create Account'}
+                    {viewState === 'LOGIN' ? 'Sign In' : viewState === 'REGISTER' ? 'Create Account' : 'Send Reset Link'}
                     <ArrowRight size={20} className="ml-2" />
                   </>
                 )}
@@ -300,11 +301,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onBack }) => {
         
         {/* Footer Links */}
         <div className="mt-8 text-center space-y-2">
-           <button onClick={handleForgotPassword} className="text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors">Forgot Password?</button>
-           <div className="flex justify-center gap-4 text-xs text-slate-400">
-              <a href="#" className="hover:text-slate-600">Privacy</a>
+           {viewState === 'LOGIN' ? (
+             <button onClick={() => setViewState('FORGOT_PASSWORD')} className="text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors">Forgot Password?</button>
+           ) : viewState === 'FORGOT_PASSWORD' ? (
+             <button onClick={() => setViewState('LOGIN')} className="text-sm font-bold text-slate-500 hover:text-slate-800 transition-colors">Back to Login</button>
+           ) : null}
+           
+           <div className="flex justify-center gap-4 text-xs text-slate-400 pt-2">
+              <button onClick={() => onViewPage && onViewPage('PRIVACY')} className="hover:text-slate-600">Privacy</button>
               <span>•</span>
-              <a href="#" className="hover:text-slate-600">Terms</a>
+              <button onClick={() => onViewPage && onViewPage('TERMS')} className="hover:text-slate-600">Terms</button>
            </div>
         </div>
       </div>

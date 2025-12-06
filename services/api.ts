@@ -1,285 +1,142 @@
-
 import { supabase } from './supabaseClient';
-import { Item, UserProfile, Category, Message, Conversation, Transaction, Booking, SwapProposal, Review, Report, Notification, College } from '../types';
+import { Item, Category, UserProfile, Notification, Conversation, Message, Review, Report, Transaction, Booking, SwapProposal, BankAccount, College } from '../types';
 
-// Helper to parse image column which might be a single URL string or a JSON array string
-const parseImages = (imgStr: string | null): string[] => {
-  if (!imgStr) return [];
-  try {
-    if (imgStr.trim().startsWith('[')) {
-      const parsed = JSON.parse(imgStr);
-      return Array.isArray(parsed) ? parsed : [imgStr];
+const parseImages = (imageField: any): string[] => {
+  if (Array.isArray(imageField)) return imageField;
+  if (typeof imageField === 'string') {
+    try {
+      const parsed = JSON.parse(imageField);
+      if (Array.isArray(parsed)) return parsed;
+      return [imageField];
+    } catch {
+      return [imageField];
     }
-    return [imgStr];
-  } catch (e) {
-    return [imgStr];
   }
+  return [];
+};
+
+// Client-side image compression utility
+const compressImage = async (file: File): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const maxWidth = 1200;
+    const maxHeight = 1200;
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Compression failed"));
+        }, 'image/jpeg', 0.8); // 80% quality JPEG
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
 };
 
 export const api = {
-  // --- CONFIG & COLLEGES ---
-  getColleges: async (): Promise<College[]> => {
-    const { data, error } = await supabase.from('colleges').select('*').order('name');
-    if (error) {
-      console.error("Failed to fetch colleges", error);
-      return [];
-    }
-    return data as College[];
-  },
-
-  // --- AUTH & PROFILE ---
-  getProfile: async (userId: string): Promise<UserProfile | null> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error fetching profile:', JSON.stringify(error));
-      return null;
-    }
-    if (!data) return null;
-
-    // Check ban status immediately
-    if (data.banned) {
-      await supabase.auth.signOut();
-      throw new Error("This account has been suspended.");
-    }
-
-    let computedStatus: 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED' = 'NONE';
-    if (data.verified === true) {
-      computedStatus = 'VERIFIED';
-    } else if (data.college_email_verified === true) {
-      computedStatus = 'PENDING';
-    }
-
+  // --- ITEMS ---
+  getItem: async (itemId: string): Promise<Item | null> => {
+    const { data, error } = await supabase.from('items').select(`*, profiles:seller_id (full_name, college, verified, banned)`).eq('id', itemId).maybeSingle();
+    
+    if (error || !data) return null;
+    
+    const images = parseImages(data.image);
     return {
       id: data.id,
-      email: data.email,
-      personalEmail: data.personal_email,
-      collegeEmail: data.college_email,
-      collegeEmailVerified: data.college_email_verified,
-      name: data.full_name,
-      college: data.college,
-      role: data.role || 'STUDENT',
-      verified: data.verified,
-      verificationStatus: computedStatus, 
-      savings: data.savings,
-      earnings: data.earnings,
-      avatar: data.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.full_name)}&background=0ea5e9&color=fff`
+      title: data.title,
+      price: data.price,
+      originalPrice: data.original_price,
+      image: images[0] || 'https://via.placeholder.com/300?text=No+Image',
+      images: images,
+      category: data.category as Category,
+      type: data.type,
+      sellerId: data.seller_id,
+      sellerName: data.profiles?.full_name || 'Unknown',
+      college: data.profiles?.college || data.college || 'Unknown',
+      verified: data.profiles?.verified || false,
+      rating: data.rating || 5.0,
+      description: data.description,
+      status: data.status
     };
   },
 
-  createProfile: async (profile: Partial<UserProfile> & { id: string }) => {
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({
-        id: profile.id,
-        email: profile.email,
-        personal_email: profile.email, 
-        full_name: profile.name,
-        college: profile.college,
-        role: profile.role || 'STUDENT',
-        avatar_url: profile.avatar,
-        verified: false,
-        college_email_verified: false,
-        banned: false
-      });
-    if (error) { console.error("Failed to create profile", error); throw error; }
-  },
-
-  updateProfile: async (userId: string, updates: Partial<UserProfile>) => {
-    const dbUpdates: any = {};
-    if (updates.name) dbUpdates.full_name = updates.name;
-    if (updates.avatar) dbUpdates.avatar_url = updates.avatar;
-    if (updates.college) dbUpdates.college = updates.college;
-
-    const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
-    if (error) throw error;
-  },
-
-  linkCollegeEmail: async (userId: string, collegeEmail: string) => {
-    // In production, this would trigger an SMTP email via Edge Function
-    // For now, we update directly
-    const { error } = await supabase.from('profiles').update({ college_email: collegeEmail, college_email_verified: true }).eq('id', userId);
-    if (error) throw error;
-  },
-
-  checkAdminCode: async (code: string): Promise<boolean> => {
-    const { data, error } = await supabase.from('app_config').select('value').eq('key', 'admin_signup_code').maybeSingle();
-    if (data) return data.value === code;
-    return false;
-  },
-
-  updateAdminCode: async (newCode: string) => {
-    const { error } = await supabase.from('app_config').upsert({ key: 'admin_signup_code', value: newCode });
-    if (error) throw error;
-  },
-
-  deleteAccount: async (userId: string) => {
-    const { error } = await supabase.from('profiles').delete().eq('id', userId);
-    if (error) throw error;
-    await supabase.auth.signOut();
-  },
-
-  // --- BLOCKING LOGIC ---
-  blockUser: async (blockerId: string, blockedId: string) => {
-    const { error } = await supabase.from('blocked_users').insert({
-      blocker_id: blockerId,
-      blocked_id: blockedId
-    });
-    // Ignore error if already blocked (unique constraint)
-    if (error && !error.message.includes("unique")) throw error;
-  },
-
-  checkIsBlocked: async (userId: string, otherUserId: string): Promise<boolean> => {
-    const { data } = await supabase.from('blocked_users')
-      .select('id')
-      .or(`and(blocker_id.eq.${userId},blocked_id.eq.${otherUserId}),and(blocker_id.eq.${otherUserId},blocked_id.eq.${userId})`)
-      .maybeSingle();
-    return !!data;
-  },
-
-  // --- ADMIN FUNCTIONALITY ---
-
-  subscribeToAdminEvents: (callback: () => void) => {
-    const channel = supabase.channel('admin-dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, callback)
-      .subscribe();
-    
-    return channel;
-  },
-
-  adminGetPendingVerifications: async () => {
-    const { data, error } = await supabase.from('profiles').select('*').eq('college_email_verified', true).eq('verified', false).eq('role', 'STUDENT');
-    if (error) return [];
-    return data;
-  },
-
-  adminVerifyUser: async (userId: string, approve: boolean) => {
-    const { error } = await supabase.from('profiles').update({ verified: approve }).eq('id', userId);
-    if (error) throw error;
-
-    if (approve) {
-      await api.createNotification({
-        userId,
-        type: 'SYSTEM',
-        title: 'You are Verified! 🎉',
-        message: 'Your student ID has been approved. You now have full access to Seconds.',
-        link: 'PROFILE'
-      });
-    }
-  },
-
-  adminGetVerificationImage: async (userId: string): Promise<string | null> => {
-    const { data: list } = await supabase.storage.from('verifications').list('', { search: userId });
-    
-    if (list && list.length > 0) {
-      // Sort by creation time desc
-      const sorted = list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      const file = sorted[0];
-      const { data } = await supabase.storage.from('verifications').createSignedUrl(file.name, 3600); 
-      return data?.signedUrl || null;
-    }
-    return null;
-  },
-
-  adminGetAllUsers: async (page: number = 0, limit: number = 20, searchQuery: string = '') => {
-    let query = supabase.from('profiles').select('*', { count: 'exact' });
-
-    if (searchQuery) {
-      query = query.or(`full_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`);
-    }
-
-    const from = page * limit;
-    const to = from + limit - 1;
-
-    const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to);
-    
-    if (error) return { users: [], count: 0 };
-    return { users: data, count: count || 0 };
-  },
-
-  adminBanUser: async (userId: string, ban: boolean) => {
-    const { error } = await supabase.from('profiles').update({ banned: ban }).eq('id', userId);
-    if (error) throw error;
-  },
-
-  adminGetStats: async () => {
-    const { count: userCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-    const { count: itemCount } = await supabase.from('items').select('*', { count: 'exact', head: true });
-    // Calculate real GMV from transactions
-    const { data: transactions } = await supabase.from('transactions').select('amount').eq('status', 'COMPLETED');
-    const gmv = transactions ? transactions.reduce((sum, t) => sum + (t.amount || 0), 0) : 0;
-
-    return { users: userCount || 0, items: itemCount || 0, gmv: gmv };
-  },
-
-  adminGetAnalytics: async () => {
-    const days = [...Array(7)].map((_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
-      return d.toISOString().split('T')[0];
-    });
-
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - 7);
-    const dateStr = sinceDate.toISOString();
-
-    const { data: newUsers } = await supabase.from('profiles').select('created_at').gte('created_at', dateStr);
-    const { data: newSales } = await supabase.from('transactions').select('created_at, amount').gte('created_at', dateStr);
-    const { data: items } = await supabase.from('items').select('category');
-
-    const chartData = days.map(day => {
-      const dayUsers = newUsers?.filter(u => u.created_at.startsWith(day)).length || 0;
-      const daySales = newSales?.filter(s => s.created_at.startsWith(day)).reduce((sum, s) => sum + (s.amount || 0), 0) || 0;
-      return {
-        name: day.split('-').slice(1).join('/'),
-        users: dayUsers,
-        sales: daySales
-      };
-    });
-
-    const catMap: Record<string, number> = {};
-    items?.forEach(i => {
-      catMap[i.category] = (catMap[i.category] || 0) + 1;
-    });
-    const categoryData = Object.keys(catMap).map(key => ({ name: key, value: catMap[key] }));
-
-    return { chartData, categoryData };
-  },
-
-  // --- ITEMS ---
-  getItems: async (type: string, category: string | 'All', searchQuery?: string, maxPrice?: number, page: number = 0, limit: number = 12): Promise<Item[]> => {
+  getItems: async (
+    type: string, 
+    category: string | 'All', 
+    searchQuery?: string, 
+    filters?: { minPrice?: number, maxPrice?: number, condition?: string[], sortBy?: string },
+    page: number = 0, 
+    limit: number = 12
+  ): Promise<Item[]> => {
     let query = supabase.from('items').select(`*, profiles:seller_id (full_name, college, verified, banned)`).eq('status', 'ACTIVE');
+    
+    // Type Filter
     let dbType = type;
     if (type === 'BUY') dbType = 'SALE';
     if (type === 'EARN') dbType = 'SERVICE';
-    
     if (['SALE', 'RENT', 'SWAP', 'SERVICE', 'REQUEST'].includes(dbType)) {
       query = query.eq('type', dbType);
     }
     
+    // Category Filter
     if (category !== 'All') query = query.eq('category', category);
 
+    // Search Filter
     if (searchQuery) {
       query = query.ilike('title', `%${searchQuery}%`);
     }
 
-    if (maxPrice && maxPrice > 0) {
-      query = query.lte('price', maxPrice);
+    // Advanced Filters
+    if (filters) {
+      if (filters.minPrice !== undefined && filters.minPrice > 0) query = query.gte('price', filters.minPrice);
+      if (filters.maxPrice !== undefined && filters.maxPrice > 0) query = query.lte('price', filters.maxPrice);
+      // Note: Condition filtering would require a 'condition' column in DB or JSON filtering. 
+      // Assuming 'description' contains condition or we skip strictly for MVP. 
+      // Ideally, add .in('condition', filters.condition) if column existed.
     }
 
     // Explicitly exclude items from banned users
     query = query.is('profiles.banned', false);
 
+    // Sorting
+    if (filters?.sortBy === 'PRICE_ASC') {
+      query = query.order('price', { ascending: true });
+    } else if (filters?.sortBy === 'PRICE_DESC') {
+      query = query.order('price', { ascending: false });
+    } else {
+      // Default NEWEST
+      query = query.order('created_at', { ascending: false });
+    }
+
     const from = page * limit;
     const to = from + limit - 1;
 
-    const { data, error } = await query.order('created_at', { ascending: false }).range(from, to);
+    const { data, error } = await query.range(from, to);
     
     if (error) return [];
 
@@ -307,37 +164,23 @@ export const api = {
       });
   },
 
-  getUserItems: async (userId: string): Promise<Item[]> => {
-    const { data, error } = await supabase.from('items').select('*').eq('seller_id', userId).order('created_at', { ascending: false });
-    if (error) return [];
-    return data.map((item: any) => {
-      const images = parseImages(item.image);
-      return {
-        id: item.id,
-        title: item.title,
-        price: item.price,
-        originalPrice: item.original_price,
-        image: images[0] || 'https://via.placeholder.com/300?text=No+Image',
-        images: images,
-        category: item.category as Category,
-        type: item.type,
-        sellerId: item.seller_id,
-        sellerName: 'Me',
-        college: item.college,
-        rating: item.rating,
-        description: item.description,
-        verified: true,
-        status: item.status
-      };
-    });
+  getTrendingItems: async (): Promise<Item[]> => {
+    // Just fetch most recent 4 items for demo
+    return await api.getItems('BUY', 'All', undefined, undefined, 0, 4);
   },
 
-  getTrendingItems: async (): Promise<Item[]> => {
-    const { data, error } = await supabase.from('items').select(`*, profiles:seller_id (full_name, college, verified, banned)`).eq('status', 'ACTIVE').order('created_at', { ascending: false }).limit(4);
-    if (error) return [];
-    return data
-      .filter((item: any) => !item.profiles?.banned)
-      .map((item: any) => {
+  getSimilarItems: async (category: string, currentItemId: string): Promise<Item[]> => {
+    const { data, error } = await supabase
+      .from('items')
+      .select(`*, profiles:seller_id (full_name, college, verified)`)
+      .eq('category', category)
+      .eq('status', 'ACTIVE')
+      .neq('id', currentItemId)
+      .limit(4);
+
+    if (error || !data) return [];
+
+    return data.map((item: any) => {
         const images = parseImages(item.image);
         return {
           id: item.id,
@@ -349,187 +192,428 @@ export const api = {
           category: item.category as Category,
           type: item.type,
           sellerId: item.seller_id,
-          sellerName: item.profiles?.full_name || 'Unknown User',
-          college: item.college,
+          sellerName: item.profiles?.full_name || 'Unknown',
+          college: item.profiles?.college || item.college || 'Unknown',
           verified: item.profiles?.verified || false,
-          rating: item.rating,
+          rating: item.rating || 5.0,
           description: item.description,
           status: item.status
         };
-      });
+    });
   },
 
-  // --- WISHLIST ---
-  toggleSavedItem: async (userId: string, itemId: string) => {
-    const { data } = await supabase.from('saved_items').select('id').eq('user_id', userId).eq('item_id', itemId).maybeSingle();
-    if (data) {
-      await supabase.from('saved_items').delete().eq('id', data.id);
-      return false;
-    } else {
-      await supabase.from('saved_items').insert({ user_id: userId, item_id: itemId });
-      return true;
+  getUserItems: async (userId: string, status?: 'ACTIVE' | 'SOLD' | 'DRAFT'): Promise<Item[]> => {
+    let query = supabase.from('items').select('*').eq('seller_id', userId);
+    
+    if (status) {
+      query = query.eq('status', status);
     }
-  },
-
-  checkIsSaved: async (userId: string, itemId: string) => {
-    const { data } = await supabase.from('saved_items').select('id').eq('user_id', userId).eq('item_id', itemId).maybeSingle();
-    return !!data;
-  },
-
-  getSavedItems: async (userId: string): Promise<Item[]> => {
-    const { data, error } = await supabase.from('saved_items').select(`item:item_id (*, profiles:seller_id (full_name, college, verified))`).eq('user_id', userId).order('created_at', { ascending: false });
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
     if (error) return [];
-    return data.map((row: any) => {
-      const item = row.item;
-      if (!item) return null;
-      const images = parseImages(item.image);
-      return {
-        id: item.id,
-        title: item.title,
-        price: item.price,
-        originalPrice: item.original_price,
-        image: images[0] || 'https://via.placeholder.com/300?text=No+Image',
-        images: images,
-        category: item.category as Category,
-        type: item.type,
-        sellerId: item.seller_id,
-        sellerName: item.profiles?.full_name || 'Unknown',
-        college: item.profiles?.college || item.college || 'Unknown',
-        verified: item.profiles?.verified || false,
-        rating: item.rating || 5.0,
-        description: item.description,
-        status: item.status
-      };
-    }).filter(Boolean) as Item[];
+    
+    return data.map((item: any) => ({
+       id: item.id,
+       title: item.title,
+       price: item.price,
+       originalPrice: item.original_price,
+       image: parseImages(item.image)[0],
+       images: parseImages(item.image),
+       category: item.category as Category,
+       type: item.type,
+       sellerId: item.seller_id,
+       sellerName: '', // Populated elsewhere if needed
+       college: item.college,
+       rating: item.rating || 5,
+       description: item.description,
+       verified: false,
+       status: item.status
+    }));
   },
 
-  uploadImage: async (file: File): Promise<string | null> => {
-    try {
-      const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Upload timed out after 10s")), 10000));
-      
-      const uploadPromise = (async () => {
-        const fileExt = file.name.split('.').pop();
-        const cleanFileName = file.name.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-        const fileName = `${Date.now()}_${cleanFileName}.${fileExt}`;
-        const filePath = `${fileName}`;
-        
-        const { error } = await supabase.storage.from('items').upload(filePath, file, { upsert: false });
-        
-        if (error) {
-           console.error("Supabase Storage Error Details:", JSON.stringify(error));
-           throw error; 
-        }
-        
-        const { data } = supabase.storage.from('items').getPublicUrl(filePath);
-        return data.publicUrl;
-      })();
-
-      const result = await Promise.race([uploadPromise, timeoutPromise]);
-      return result as string;
-    } catch (error: any) {
-      console.error("Upload Image Failed:", error);
-      return null;
-    }
-  },
-
-  createItem: async (item: Omit<Item, 'id' | 'sellerName' | 'verified' | 'rating' | 'college' | 'status'> & { status?: string, images: string[] }, userId: string, college: string) => {
-    const imagePayload = item.images.length > 0 ? JSON.stringify(item.images) : null;
+  createItem: async (itemData: any, userId: string, college: string): Promise<Item | null> => {
     const { data, error } = await supabase.from('items').insert({
-        title: item.title,
-        description: item.description,
-        price: item.price,
-        original_price: item.originalPrice,
-        category: item.category,
-        type: item.type,
-        image: imagePayload,
-        seller_id: userId,
-        college: college,
-        status: item.status || 'ACTIVE'
+      seller_id: userId,
+      title: itemData.title,
+      description: itemData.description,
+      price: itemData.price,
+      original_price: itemData.originalPrice,
+      category: itemData.category,
+      type: itemData.type,
+      image: JSON.stringify(itemData.images),
+      college: college,
+      status: itemData.status
     }).select().single();
+    
     if (error) throw error;
     return data;
   },
 
-  updateItem: async (itemId: string, updates: Partial<Item> & { images?: string[] }) => {
-    const dbUpdates: any = {};
-    if (updates.title) dbUpdates.title = updates.title;
-    if (updates.description) dbUpdates.description = updates.description;
-    if (updates.price !== undefined) dbUpdates.price = updates.price;
-    if (updates.category) dbUpdates.category = updates.category;
-    if (updates.type) dbUpdates.type = updates.type;
-    if (updates.status) dbUpdates.status = updates.status;
-    if (updates.images) dbUpdates.image = JSON.stringify(updates.images);
-    else if (updates.image) dbUpdates.image = updates.image;
-    const { data, error } = await supabase.from('items').update(dbUpdates).eq('id', itemId).select().single();
+  updateItem: async (itemId: string, updates: any): Promise<void> => {
+    const dbUpdates = { ...updates };
+    
+    // Map 'images' array to 'image' JSON string for DB
+    if (dbUpdates.images) {
+      dbUpdates.image = JSON.stringify(dbUpdates.images);
+      delete dbUpdates.images; // Remove key that doesn't exist in DB
+    }
+    
+    const { error } = await supabase.from('items').update(dbUpdates).eq('id', itemId);
     if (error) throw error;
-    return data;
   },
 
-  deleteItem: async (itemId: string) => {
+  deleteItem: async (itemId: string): Promise<void> => {
+    // 1. Fetch item to get images
+    const { data: item } = await supabase.from('items').select('image').eq('id', itemId).single();
+    
+    if (item && item.image) {
+      const images = parseImages(item.image);
+      const filesToRemove = images.map(url => {
+        // Extract filename from URL: .../items/filename.jpg
+        const parts = url.split('/');
+        return parts[parts.length - 1];
+      }).filter(Boolean);
+
+      if (filesToRemove.length > 0) {
+        await supabase.storage.from('items').remove(filesToRemove);
+      }
+    }
+
+    // 2. Delete row
     const { error } = await supabase.from('items').delete().eq('id', itemId);
     if (error) throw error;
   },
 
+  uploadImage: async (file: File): Promise<string | null> => {
+    try {
+      // 1. Compress Image
+      let fileToUpload: File | Blob = file;
+      if (file.size > 1024 * 1024) { // If > 1MB
+         try {
+           fileToUpload = await compressImage(file);
+         } catch (e) {
+           console.warn("Compression failed, using original file", e);
+         }
+      }
+
+      // Create a unique file name with timestamp to avoid collision
+      const fileExt = file.name.split('.').pop() || 'jpg';
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      // 2. Try Upload
+      // We use 'items' bucket as per standard SQL
+      const { error: uploadError } = await supabase.storage.from('items').upload(filePath, fileToUpload, {
+        upsert: false // Safer for new files
+      });
+
+      if (uploadError) {
+        console.error("Supabase Storage Error:", uploadError);
+        return null;
+      }
+
+      const { data } = supabase.storage.from('items').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      console.error("Upload Exception:", e);
+      return null;
+    }
+  },
+
+  // --- PROFILES ---
+
+  getProfile: async (userId: string): Promise<UserProfile | null> => {
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (error || !data) return null;
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.full_name,
+      college: data.college,
+      role: data.role,
+      verified: data.verified,
+      savings: data.savings || 0,
+      earnings: data.earnings || 0,
+      avatar: data.avatar_url || `https://ui-avatars.com/api/?name=${data.full_name}`,
+      verificationStatus: data.verification_status || 'NONE',
+      banned: data.banned,
+      bio: data.bio,
+      socialLinks: data.social_links,
+      collegeEmail: data.college_email,
+      collegeEmailVerified: data.college_email_verified
+    };
+  },
+
+  createProfile: async (profile: Partial<UserProfile>): Promise<void> => {
+    const { error } = await supabase.from('profiles').insert({
+      id: profile.id,
+      email: profile.email,
+      full_name: profile.name,
+      college: profile.college,
+      role: profile.role,
+      avatar_url: profile.avatar
+    });
+    if (error) throw error;
+  },
+
+  updateProfile: async (userId: string, updates: any): Promise<void> => {
+    const { error } = await supabase.from('profiles').update({
+       full_name: updates.name,
+       avatar_url: updates.avatar,
+       bio: updates.bio,
+       social_links: updates.socialLinks
+    }).eq('id', userId);
+    if (error) throw error;
+  },
+
+  // --- USER ANALYTICS ---
+  
+  getUserEarningsHistory: async (userId: string): Promise<any[]> => {
+    // 1. Get transactions where I am the seller and status is completed
+    const { data } = await supabase
+      .from('transactions')
+      .select('amount, created_at')
+      .eq('seller_id', userId)
+      .eq('status', 'COMPLETED')
+      .order('created_at', { ascending: true });
+
+    if (!data) return [];
+
+    // 2. Aggregate by Month
+    const monthlyData: Record<string, number> = {};
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    
+    // Initialize last 6 months with 0
+    const today = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const key = `${monthNames[d.getMonth()]}`;
+      monthlyData[key] = 0;
+    }
+
+    data.forEach((txn: any) => {
+      const d = new Date(txn.created_at);
+      // Only process if within the last 6 months roughly
+      const key = monthNames[d.getMonth()];
+      if (monthlyData.hasOwnProperty(key)) {
+        monthlyData[key] += txn.amount;
+      }
+    });
+
+    return Object.entries(monthlyData).map(([name, earnings]) => ({ name, earnings }));
+  },
+
+  // --- NOTIFICATIONS & SAVED ---
+
+  subscribeToNotifications: (userId: string, callback: (n: Notification) => void) => {
+    return supabase.channel(`notifications:${userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` }, 
+      (payload) => {
+        callback({
+          id: payload.new.id,
+          userId: payload.new.user_id,
+          type: payload.new.type,
+          title: payload.new.title,
+          message: payload.new.message,
+          isRead: false,
+          createdAt: payload.new.created_at,
+          link: payload.new.link
+        });
+      }).subscribe();
+  },
+
+  getNotifications: async (userId: string): Promise<Notification[]> => {
+    const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
+    if (error) return [];
+    return data.map((n: any) => ({
+      id: n.id,
+      userId: n.user_id,
+      type: n.type,
+      title: n.title,
+      message: n.message,
+      isRead: n.is_read,
+      createdAt: n.created_at,
+      link: n.link
+    }));
+  },
+
+  markNotificationAsRead: async (notificationId: string): Promise<void> => {
+    await supabase.from('notifications').update({ is_read: true }).eq('id', notificationId);
+  },
+
+  getSavedItems: async (userId: string): Promise<Item[]> => {
+    const { data, error } = await supabase.from('saved_items').select('item_id, items(*)').eq('user_id', userId);
+    if (error) return [];
+    return data.map((row: any) => {
+       const item = row.items;
+       return {
+          id: item.id,
+          title: item.title,
+          price: item.price,
+          image: parseImages(item.image)[0],
+          images: parseImages(item.image),
+          category: item.category as Category,
+          type: item.type,
+          sellerId: item.seller_id,
+          sellerName: 'Unknown',
+          college: item.college,
+          rating: 5,
+          description: item.description,
+          verified: false,
+          status: item.status
+       };
+    });
+  },
+
+  checkIsSaved: async (userId: string, itemId: string): Promise<boolean> => {
+     const { data } = await supabase.from('saved_items').select('id').eq('user_id', userId).eq('item_id', itemId).maybeSingle();
+     return !!data;
+  },
+
+  toggleSavedItem: async (userId: string, itemId: string): Promise<boolean> => {
+     const isSaved = await api.checkIsSaved(userId, itemId);
+     if (isSaved) {
+       await supabase.from('saved_items').delete().eq('user_id', userId).eq('item_id', itemId);
+       return false;
+     } else {
+       await supabase.from('saved_items').insert({ user_id: userId, item_id: itemId });
+       return true;
+     }
+  },
+
+  // --- ORDERS / BOOKINGS / SWAPS ---
+
+  getUserOrders: async (userId: string): Promise<{purchases: any[], bookings: any[], swaps: any[]}> => {
+    const [purchases, bookings, swaps] = await Promise.all([
+       supabase.from('transactions').select('*, item:items(*)').eq('buyer_id', userId),
+       supabase.from('bookings').select('*, service:items(*)').eq('booker_id', userId),
+       supabase.from('swap_proposals').select('*, offeredItem:offered_item_id(*), targetItem:target_item_id(*)').eq('initiator_id', userId)
+    ]);
+    return {
+       purchases: purchases.data || [],
+       bookings: bookings.data || [],
+       swaps: swaps.data || []
+    };
+  },
+
+  getIncomingOffers: async (userId: string): Promise<any[]> => {
+     const { data, error } = await supabase.from('swap_proposals')
+       .select('*, initiator:profiles!initiator_id(*), offeredItem:items!offered_item_id(*), targetItem:items!target_item_id(*)')
+       .eq('receiver_id', userId)
+       .eq('status', 'PENDING');
+     return data || [];
+  },
+
+  getProviderBookings: async (userId: string): Promise<any[]> => {
+     const { data, error } = await supabase.from('bookings')
+       .select('*, booker:profiles!booker_id(*), service:items!service_id(*)')
+       .eq('provider_id', userId);
+     return data || [];
+  },
+
+  respondToProposal: async (id: string, status: string): Promise<void> => {
+     await supabase.from('swap_proposals').update({ status }).eq('id', id);
+  },
+
+  updateBookingStatus: async (id: string, status: string): Promise<void> => {
+     await supabase.from('bookings').update({ status }).eq('id', id);
+  },
+
+  confirmOrder: async (transactionId: string, userId: string): Promise<void> => {
+     // Call RPC to complete order and transfer funds
+     const { error } = await supabase.rpc('complete_order', { p_txn_id: transactionId, p_user_id: userId });
+     if (error) throw error;
+  },
+
+  createTransaction: async (data: any): Promise<void> => {
+     // Call RPC to atomically lock item and create transaction
+     const { error } = await supabase.rpc('create_order', { 
+        p_buyer_id: data.buyerId,
+        p_seller_id: data.sellerId,
+        p_item_id: data.itemId,
+        p_amount: data.amount
+     });
+     if (error) throw error;
+  },
+
+  createBooking: async (data: any): Promise<void> => {
+     const { error } = await supabase.from('bookings').insert({
+        booker_id: data.bookerId,
+        provider_id: data.providerId,
+        service_id: data.serviceId,
+        booking_date: data.bookingDate,
+        status: 'REQUESTED'
+     });
+     if (error) throw error;
+  },
+
+  createSwapProposal: async (data: any): Promise<void> => {
+     const { error } = await supabase.from('swap_proposals').insert({
+        initiator_id: data.initiatorId,
+        receiver_id: data.receiverId,
+        target_item_id: data.targetItemId,
+        offered_item_id: data.offeredItemId,
+        status: 'PENDING'
+     });
+     if (error) throw error;
+  },
+
+  // --- REVIEWS & REPORTS ---
+
+  getReviews: async (userId: string): Promise<Review[]> => {
+     const { data, error } = await supabase.from('reviews').select('*, reviewer:profiles!reviewer_id(full_name, avatar_url)').eq('target_user_id', userId);
+     if (error) return [];
+     return data.map((r: any) => ({
+        id: r.id,
+        reviewerId: r.reviewer_id,
+        targetUserId: r.target_user_id,
+        rating: r.rating,
+        comment: r.comment,
+        createdAt: r.created_at,
+        reviewerName: r.reviewer?.full_name,
+        reviewerAvatar: r.reviewer?.avatar_url
+     }));
+  },
+
+  createReview: async (data: any): Promise<void> => {
+     const { error } = await supabase.from('reviews').insert({
+        reviewer_id: data.reviewerId,
+        target_user_id: data.targetUserId,
+        rating: data.rating,
+        comment: data.comment
+     });
+     if (error) throw error;
+  },
+
+  createReport: async (data: any): Promise<void> => {
+     const { error } = await supabase.from('reports').insert({
+        reporter_id: data.reporterId,
+        item_id: data.itemId === 'SUPPORT_TICKET' ? null : data.itemId,
+        reason: data.reason,
+        status: 'PENDING'
+     });
+     if (error) throw error;
+  },
+
   // --- MESSAGING ---
-  sendMessage: async (senderId: string, receiverId: string, content: string, itemId?: string) => {
-    const { data, error } = await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content: content, item_id: itemId }).select().single();
-    if (error) throw error;
-    return data;
-  },
-
-  getMessages: async (currentUserId: string, otherUserId: string, itemId?: string) => {
-    // Check block status first
-    const isBlocked = await api.checkIsBlocked(currentUserId, otherUserId);
-    if (isBlocked) return [];
-
-    let query = supabase.from('messages').select('*').or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`).order('created_at', { ascending: true });
-    const { data, error } = await query;
-    if (error) throw error;
-    return data.map((msg: any) => ({
-      id: msg.id,
-      senderId: msg.sender_id,
-      receiverId: msg.receiver_id,
-      itemId: msg.item_id,
-      content: msg.content,
-      createdAt: msg.created_at,
-      isRead: msg.is_read
-    })) as Message[];
-  },
-
-  subscribeToMessages: (userId: string, callback: (msg: Message) => void) => {
-    return supabase.channel('public:messages').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` }, async (payload) => {
-        const msg = payload.new;
-        // Verify block status on realtime event
-        const isBlocked = await api.checkIsBlocked(userId, msg.sender_id);
-        if (!isBlocked) {
-          callback({
-            id: msg.id,
-            senderId: msg.sender_id,
-            receiverId: msg.receiver_id,
-            itemId: msg.item_id,
-            content: msg.content,
-            createdAt: msg.created_at,
-            isRead: msg.is_read
-          });
-        }
-    }).subscribe();
-  },
 
   getConversations: async (userId: string): Promise<Conversation[]> => {
-    const { data: messages, error } = await supabase.from('messages').select(`*, sender:sender_id (full_name, avatar_url), receiver:receiver_id (full_name, avatar_url), item:item_id (title, image)`).or(`sender_id.eq.${userId},receiver_id.eq.${userId}`).order('created_at', { ascending: false });
-    if (error) return [];
-    
-    const { data: blocks } = await supabase.from('blocked_users').select('*').or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`);
-    const blockedIds = blocks ? blocks.map((b: any) => b.blocker_id === userId ? b.blocked_id : b.blocker_id) : [];
+     // Fetch all messages involving the user
+     const { data: messages, error } = await supabase
+      .from('messages')
+      .select(`*, sender:sender_id (full_name, avatar_url), receiver:receiver_id (full_name, avatar_url), item:item_id (title, image)`)
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order('created_at', { ascending: false });
+
+    if (error || !messages) return [];
 
     const conversationsMap = new Map<string, Conversation>();
+
     messages.forEach((msg: any) => {
       const isSender = msg.sender_id === userId;
       const partnerId = isSender ? msg.receiver_id : msg.sender_id;
-      
-      if (blockedIds.includes(partnerId)) return;
-
       const partnerProfile = isSender ? msg.receiver : msg.sender;
+      
       if (!conversationsMap.has(partnerId)) {
         const itemImages = parseImages(msg.item?.image);
         conversationsMap.set(partnerId, {
@@ -550,203 +634,362 @@ export const api = {
         }
       }
     });
+
     return Array.from(conversationsMap.values());
   },
 
-  // --- TRANSACTIONS & OFFERS ---
-  createTransaction: async (data: Partial<Transaction>) => {
-    const { error } = await supabase.rpc('create_order', {
-       p_buyer_id: data.buyerId,
-       p_seller_id: data.sellerId,
-       p_item_id: data.itemId,
-       p_amount: data.amount
+  getMessages: async (userId: string, partnerId: string, itemId?: string): Promise<Message[]> => {
+     let query = supabase.from('messages')
+       .select('*')
+       .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+       .or(`sender_id.eq.${partnerId},receiver_id.eq.${partnerId}`)
+       .order('created_at', { ascending: true });
+     
+     if (itemId) query = query.eq('item_id', itemId);
+
+     const { data, error } = await query;
+     if (error) return [];
+
+     return data.map((m: any) => ({
+        id: m.id,
+        senderId: m.sender_id,
+        receiverId: m.receiver_id,
+        itemId: m.item_id,
+        content: m.content,
+        image: m.image_url,
+        createdAt: m.created_at,
+        isRead: m.is_read
+     }));
+  },
+
+  sendMessage: async (senderId: string, receiverId: string, content: string, itemId?: string, imageUrl?: string): Promise<void> => {
+     const { error } = await supabase.from('messages').insert({
+        sender_id: senderId,
+        receiver_id: receiverId,
+        content: content,
+        item_id: itemId,
+        image_url: imageUrl
+     });
+     if (error) throw error;
+  },
+
+  markMessagesAsRead: async (senderId: string, receiverId: string): Promise<void> => {
+    await supabase.from('messages')
+      .update({ is_read: true })
+      .eq('sender_id', senderId)
+      .eq('receiver_id', receiverId)
+      .eq('is_read', false);
+  },
+
+  subscribeToMessages: (userId: string, callback: (msg: Message) => void) => {
+    return supabase.channel(`messages:${userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` }, 
+      (payload) => {
+         callback({
+            id: payload.new.id,
+            senderId: payload.new.sender_id,
+            receiverId: payload.new.receiver_id,
+            content: payload.new.content,
+            image: payload.new.image_url,
+            itemId: payload.new.item_id,
+            createdAt: payload.new.created_at,
+            isRead: false
+         });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${userId}` }, 
+      (payload) => {
+         // Echo back own messages if needed for multi-device sync
+      })
+      .subscribe();
+  },
+
+  blockUser: async (blockerId: string, blockedId: string): Promise<void> => {
+     const { error } = await supabase.from('blocked_users').insert({ blocker_id: blockerId, blocked_id: blockedId });
+     // Ignore duplicates
+     if (error && error.code !== '23505') throw error;
+  },
+
+  unblockUser: async (blockerId: string, blockedId: string): Promise<void> => {
+     await supabase.from('blocked_users').delete().eq('blocker_id', blockerId).eq('blocked_id', blockedId);
+  },
+
+  getBlockedUsers: async (userId: string): Promise<any[]> => {
+     const { data } = await supabase.from('blocked_users').select('blocked:blocked_id(id, full_name, avatar_url)').eq('blocker_id', userId);
+     return data?.map((r: any) => ({ id: r.blocked.id, name: r.blocked.full_name, avatar: r.blocked.avatar_url })) || [];
+  },
+
+  checkIsBlocked: async (userId: string, otherId: string): Promise<boolean> => {
+     const { data } = await supabase.from('blocked_users').select('id')
+       .or(`and(blocker_id.eq.${userId},blocked_id.eq.${otherId}),and(blocker_id.eq.${otherId},blocked_id.eq.${userId})`)
+       .maybeSingle();
+     return !!data;
+  },
+
+  // --- COLLEGES & VERIFICATION ---
+
+  getColleges: async (): Promise<College[]> => {
+     const { data } = await supabase.from('colleges').select('*');
+     return data || [];
+  },
+
+  sendCollegeVerification: async (email: string): Promise<string> => {
+     // REAL IMPLEMENTATION using DB-backed OTP
+     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+     
+     // 1. Store code in DB
+     const { error } = await supabase.from('verification_codes').insert({
+        email: email,
+        code: otp
+     });
+     if (error) throw error;
+
+     // 2. Return code for Demo (In real prod, this would only return void and send email)
+     console.log(`%c[EMAILING SERVICE] Verification Code for ${email}: ${otp}`, 'color: #0ea5e9; font-weight: bold; font-size: 14px;');
+     return otp;
+  },
+
+  verifyCollegeEmail: async (userId: string, email: string, otp: string): Promise<void> => {
+     // 1. Validate Code against DB
+     const { data, error } = await supabase.from('verification_codes')
+       .select('*')
+       .eq('email', email)
+       .eq('code', otp)
+       .gt('expires_at', new Date().toISOString())
+       .order('created_at', { ascending: false })
+       .limit(1)
+       .maybeSingle();
+
+     if (!data) throw new Error("Invalid or expired verification code.");
+
+     // 2. Update Profile
+     await supabase.from('profiles').update({ 
+        college_email: email,
+        college_email_verified: true,
+        verification_status: 'PENDING'
+     }).eq('id', userId);
+
+     // 3. Cleanup used code
+     await supabase.from('verification_codes').delete().eq('id', data.id);
+  },
+
+  adminGetVerificationImage: async (userId: string): Promise<string | null> => {
+    // Dynamically search for the file since the extension is unknown (jpg/png)
+    const { data, error } = await supabase.storage.from('verifications').list('', {
+      search: `${userId}-student-id`
     });
-    if (error) throw error;
-  },
 
-  confirmOrder: async (txnId: string, buyerId: string) => {
-    const { error } = await supabase.rpc('complete_order', {
-      p_txn_id: txnId,
-      p_user_id: buyerId
-    });
-    if (error) throw error;
-  },
-
-  createBooking: async (data: Partial<Booking>) => {
-    const { error } = await supabase.from('bookings').insert({
-       booker_id: data.bookerId,
-       provider_id: data.providerId,
-       service_id: data.serviceId,
-       booking_date: data.bookingDate,
-       status: 'REQUESTED'
-    });
-    if (error) throw error;
-  },
-
-  createSwapProposal: async (data: Partial<SwapProposal>) => {
-    const { error } = await supabase.from('swap_proposals').insert({
-      initiator_id: data.initiatorId,
-      receiver_id: data.receiverId,
-      target_item_id: data.targetItemId,
-      offered_item_id: data.offeredItemId,
-      status: 'PENDING'
-    });
-    if (error) throw error;
-  },
-
-  getIncomingOffers: async (userId: string) => {
-    const { data } = await supabase.from('swap_proposals')
-      .select('*, initiator:initiator_id(full_name, avatar_url), targetItem:target_item_id(*), offeredItem:offered_item_id(*)')
-      .eq('receiver_id', userId)
-      .eq('status', 'PENDING')
-      .order('created_at', { ascending: false });
-    return data || [];
-  },
-
-  respondToProposal: async (proposalId: string, status: 'ACCEPTED' | 'REJECTED') => {
-    const { error } = await supabase.from('swap_proposals').update({ status }).eq('id', proposalId);
-    if (error) throw error;
-    
-    // If accepted, maybe we want to notify or auto-chat
-    if (status === 'ACCEPTED') {
-       // Logic to mark item as swapped could go here, or handled manually by users
+    if (data && data.length > 0) {
+      const fileName = data[0].name;
+      // Use createSignedUrl for security (valid for 1 hour) instead of public URL
+      // This ensures student IDs are not publicly accessible
+      const { data: urlData } = await supabase.storage.from('verifications').createSignedUrl(fileName, 3600);
+      return urlData?.signedUrl || null;
     }
+
+    return null;
   },
 
-  getUserOrders: async (userId: string) => {
-    const { data: purchases } = await supabase.from('transactions').select('*, item:item_id(*)').eq('buyer_id', userId).order('created_at', { ascending: false });
-    const { data: bookings } = await supabase.from('bookings').select('*, service:service_id(*)').eq('booker_id', userId).order('created_at', { ascending: false });
-    const { data: swaps } = await supabase.from('swap_proposals').select('*, targetItem:target_item_id(*), offeredItem:offered_item_id(*)').eq('initiator_id', userId).order('created_at', { ascending: false });
-    return {
-      purchases: purchases || [],
-      bookings: bookings || [],
-      swaps: swaps || []
-    };
+  // --- ADMIN ---
+
+  checkAdminCode: async (code: string): Promise<boolean> => {
+     const { data } = await supabase.from('app_config').select('value').eq('key', 'admin_signup_code').single();
+     return data?.value === code;
   },
 
-  getWalletHistory: async (userId: string) => {
-     const { data: sales } = await supabase.from('transactions').select('*, item:item_id(*)').eq('seller_id', userId).order('created_at', { ascending: false });
-     const { data: providedServices } = await supabase.from('bookings').select('*, service:service_id(*)').eq('provider_id', userId).eq('status', 'COMPLETED').order('created_at', { ascending: false });
-     const { data: purchases } = await supabase.from('transactions').select('*, item:item_id(*)').eq('buyer_id', userId).order('created_at', { ascending: false });
-     return {
-        credits: [...(sales || []), ...(providedServices || [])],
-        debits: purchases || []
+  updateAdminCode: async (code: string): Promise<void> => {
+     await supabase.from('app_config').upsert({ key: 'admin_signup_code', value: code });
+  },
+
+  adminGetStats: async (): Promise<any> => {
+     // REAL AGGREGATION: Get count of users, items, and sum of transactions
+     const [users, items, transactions] = await Promise.all([
+        supabase.from('profiles').select('id', { count: 'exact', head: true }),
+        supabase.from('items').select('id', { count: 'exact', head: true }),
+        supabase.from('transactions').select('amount')
+     ]);
+     
+     // Calculate Real GMV from transaction rows
+     const gmv = (transactions.data || []).reduce((sum, txn: any) => sum + (txn.amount || 0), 0);
+
+     return { 
+       users: users.count || 0, 
+       items: items.count || 0, 
+       gmv: gmv 
      };
   },
 
-  withdrawFunds: async (userId: string, amount: number) => {
-    const { error } = await supabase.rpc('withdraw_funds', {
-      p_user_id: userId,
-      p_amount: amount
-    });
-    if (error) throw error;
+  adminGetAnalytics: async (): Promise<any> => {
+     // REAL DATA FETCHING for Charts
+     // 1. Fetch transactions for the last 7 days
+     const sevenDaysAgo = new Date();
+     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+     
+     const { data: recentSales } = await supabase
+       .from('transactions')
+       .select('amount, created_at')
+       .gte('created_at', sevenDaysAgo.toISOString());
+
+     const { data: recentUsers } = await supabase
+       .from('profiles')
+       .select('created_at')
+       .gte('created_at', sevenDaysAgo.toISOString());
+
+     const { data: categoryItems } = await supabase
+       .from('items')
+       .select('category');
+
+     // Process for Chart: Group by Day
+     const chartDataMap: Record<string, { sales: number, users: number }> = {};
+     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+     
+     // Initialize last 7 days
+     for (let i = 0; i < 7; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dayName = days[d.getDay()];
+        chartDataMap[dayName] = { sales: 0, users: 0 };
+     }
+
+     recentSales?.forEach((sale: any) => {
+        const d = new Date(sale.created_at);
+        const dayName = days[d.getDay()];
+        if (chartDataMap[dayName]) chartDataMap[dayName].sales += sale.amount;
+     });
+
+     recentUsers?.forEach((user: any) => {
+        const d = new Date(user.created_at);
+        const dayName = days[d.getDay()];
+        if (chartDataMap[dayName]) chartDataMap[dayName].users += 1;
+     });
+
+     // Process Category Data
+     const categoryMap: Record<string, number> = {};
+     categoryItems?.forEach((item: any) => {
+        const cat = item.category || 'Other';
+        categoryMap[cat] = (categoryMap[cat] || 0) + 1;
+     });
+
+     return {
+        chartData: Object.entries(chartDataMap).map(([name, val]) => ({ name, ...val })).reverse(), // Show oldest to newest left to right
+        categoryData: Object.entries(categoryMap).map(([name, value]) => ({ name, value }))
+     };
   },
 
-  // --- REVIEWS & REPORTS ---
-  getReviews: async (targetUserId: string): Promise<Review[]> => {
-    const { data, error } = await supabase.from('reviews').select('*, reviewer:reviewer_id(full_name, avatar_url)').eq('target_user_id', targetUserId).order('created_at', { ascending: false });
-    if (error) return [];
-    return data.map((r: any) => ({
-      id: r.id,
-      reviewerId: r.reviewer_id,
-      targetUserId: r.target_user_id,
-      rating: r.rating,
-      comment: r.comment,
-      createdAt: r.created_at,
-      reviewerName: r.reviewer?.full_name || 'Student',
-      reviewerAvatar: r.reviewer?.avatar_url
-    }));
+  adminGetRecentTransactions: async (): Promise<any[]> => {
+    // Properly join profiles for buyer/seller names and item for title
+    const { data } = await supabase
+      .from('transactions')
+      .select('*, buyer:profiles!buyer_id(full_name), seller:profiles!seller_id(full_name), item:items(title)')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    return data || [];
   },
 
-  createReview: async (review: { reviewerId: string, targetUserId: string, rating: number, comment: string }) => {
-    const { error } = await supabase.from('reviews').insert({
-      reviewer_id: review.reviewerId,
-      target_user_id: review.targetUserId,
-      rating: review.rating,
-      comment: review.comment
-    });
-    if (error) throw error;
-  },
-
-  createReport: async (report: { reporterId: string, itemId: string, reason: string }) => {
-    const { error } = await supabase.from('reports').insert({
-      reporter_id: report.reporterId,
-      item_id: report.itemId === 'SUPPORT_TICKET' ? null : report.itemId,
-      reason: report.reason
-    });
-    if (error) throw error;
+  adminGetPendingVerifications: async (): Promise<any[]> => {
+     const { data } = await supabase.from('profiles').select('*').eq('college_email_verified', true).eq('verified', false).eq('role', 'STUDENT');
+     return data || [];
   },
 
   adminGetReports: async (): Promise<Report[]> => {
-    const { data, error } = await supabase.from('reports').select('*, item:item_id(*)').eq('status', 'PENDING');
-    if (error) return [];
-    return data;
+     const { data } = await supabase.from('reports').select('*, item:items(*)').eq('status', 'PENDING');
+     if (!data) return [];
+     return data.map((r: any) => ({
+        id: r.id,
+        reporterId: r.reporter_id,
+        itemId: r.item_id,
+        reason: r.reason,
+        status: r.status,
+        createdAt: r.created_at,
+        item: r.item ? { id: r.item.id, title: r.item.title } : undefined
+     }));
   },
 
-  adminResolveReport: async (reportId: string, action: 'DISMISS' | 'DELETE_ITEM', itemId?: string) => {
-    if (action === 'DELETE_ITEM' && itemId) {
-      await supabase.from('items').update({ status: 'ARCHIVED' }).eq('id', itemId);
-      const { data: item } = await supabase.from('items').select('seller_id').eq('id', itemId).single();
-      if (item) {
-        await api.createNotification({
-          userId: item.seller_id,
-          type: 'ALERT',
-          title: 'Item Removed ⚠️',
-          message: 'Your item was removed for violating community guidelines.',
-          link: 'PROFILE'
-        });
-      }
-    }
-    await supabase.from('reports').update({ status: 'RESOLVED' }).eq('id', reportId);
+  adminGetAllUsers: async (page: number, limit: number, search: string): Promise<{users: any[], count: number}> => {
+     let query = supabase.from('profiles').select('*', { count: 'exact' });
+     if (search) query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+     
+     const { data, count } = await query.range(page * limit, (page + 1) * limit - 1);
+     return { users: data || [], count: count || 0 };
   },
 
-  // --- NOTIFICATIONS ---
-  getNotifications: async (userId: string): Promise<Notification[]> => {
-    const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
-    if (error) return [];
-    return data.map((n: any) => ({
-      id: n.id,
-      userId: n.user_id,
-      type: n.type,
-      title: n.title,
-      message: n.message,
-      isRead: n.is_read,
-      link: n.link,
-      createdAt: n.created_at
-    }));
+  adminVerifyUser: async (userId: string, approve: boolean): Promise<void> => {
+     await supabase.from('profiles').update({
+        verified: approve,
+        // If rejected, maybe reset college email verified? For now just verified flag.
+     }).eq('id', userId);
+     
+     // Notify user
+     await supabase.from('notifications').insert({
+        user_id: userId,
+        type: 'SYSTEM',
+        title: approve ? 'You are Verified! 🎉' : 'Verification Rejected',
+        message: approve ? 'You can now trade freely on Seconds.' : 'Please upload a clear photo of your student ID.',
+        link: 'PROFILE'
+     });
   },
 
-  createNotification: async (notif: Partial<Notification>) => {
-    const { error } = await supabase.from('notifications').insert({
-      user_id: notif.userId,
-      type: notif.type,
-      title: notif.title,
-      message: notif.message,
-      link: notif.link
-    });
-    if (error) console.error("Failed to send notification", error);
+  adminBanUser: async (userId: string, ban: boolean): Promise<void> => {
+     await supabase.from('profiles').update({ banned: ban }).eq('id', userId);
   },
 
-  subscribeToNotifications: (userId: string, callback: (n: Notification) => void) => {
-    return supabase.channel('public:notifications')
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'notifications', 
-        filter: `user_id=eq.${userId}` 
-      }, (payload) => {
-        const n = payload.new;
-        callback({
-          id: n.id,
-          userId: n.user_id,
-          type: n.type,
-          title: n.title,
-          message: n.message,
-          isRead: n.is_read,
-          link: n.link,
-          createdAt: n.created_at
-        });
-      })
-      .subscribe();
+  adminResolveReport: async (reportId: string, action: 'DISMISS' | 'DELETE_ITEM', itemId?: string): Promise<void> => {
+     if (action === 'DELETE_ITEM' && itemId) {
+        await api.deleteItem(itemId);
+     }
+     await supabase.from('reports').update({ status: 'RESOLVED' }).eq('id', reportId);
+  },
+
+  subscribeToAdminEvents: (callback: () => void) => {
+     // Subscribe to relevant tables for dashboard updates
+     return supabase.channel('admin-dashboard')
+       .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, callback)
+       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, callback)
+       .subscribe();
+  },
+
+  // --- WALLET ---
+
+  getWalletHistory: async (userId: string): Promise<{credits: any[], debits: any[]}> => {
+     const { data: credits } = await supabase.from('transactions').select('*, item:items(title)').eq('seller_id', userId);
+     const { data: debits } = await supabase.from('transactions').select('*, item:items(title)').eq('buyer_id', userId);
+     return { credits: credits || [], debits: debits || [] };
+  },
+
+  getBankAccounts: async (userId: string): Promise<BankAccount[]> => {
+     const { data } = await supabase.from('bank_accounts').select('*').eq('user_id', userId);
+     return data?.map((b: any) => ({
+        id: b.id,
+        bankName: b.bank_name,
+        last4: b.last4,
+        holderName: b.holder_name
+     })) || [];
+  },
+
+  addBankAccount: async (userId: string, bank: Partial<BankAccount>): Promise<void> => {
+     await supabase.from('bank_accounts').insert({
+        user_id: userId,
+        bank_name: bank.bankName,
+        last4: bank.last4,
+        holder_name: bank.holderName
+     });
+  },
+
+  deleteBankAccount: async (id: string): Promise<void> => {
+     await supabase.from('bank_accounts').delete().eq('id', id);
+  },
+
+  withdrawFunds: async (userId: string, amount: number): Promise<void> => {
+     // Decrement earnings
+     // This usually requires a transaction or RPC to be safe
+     const { error } = await supabase.rpc('withdraw_funds', { p_user_id: userId, p_amount: amount });
+     if (error) throw error;
+  },
+
+  deleteAccount: async (userId: string): Promise<void> => {
+     // RPC to handle cascading deletes if not set in DB
+     // Or rely on cascading foreign keys in Postgres
+     await supabase.from('profiles').delete().eq('id', userId);
+     // Also sign out
+     await supabase.auth.signOut();
   }
 };

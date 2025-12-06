@@ -1,26 +1,48 @@
 
 import React, { useState } from 'react';
 import { ChevronLeft, ShieldCheck, Mail, FileText, Lock, Send, Loader2, CheckCircle2, Users, Briefcase, Newspaper, Globe } from 'lucide-react';
-import { ModuleType } from '../types';
+import { ModuleType, UserProfile } from '../types';
+import { api } from '../services/api';
+import { useToast } from '../components/Toast';
 
 interface StaticPagesProps {
   type: ModuleType;
   onBack: () => void;
+  user?: UserProfile | null;
 }
 
-export const StaticPages: React.FC<StaticPagesProps> = ({ type, onBack }) => {
+export const StaticPages: React.FC<StaticPagesProps> = ({ type, onBack, user }) => {
   const [contactForm, setContactForm] = useState({ name: '', email: '', message: '' });
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const { showToast } = useToast();
 
-  const handleContactSubmit = (e: React.FormEvent) => {
+  const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
-      setSent(true);
-    }, 1500);
+    
+    if (user) {
+      try {
+        await api.createReport({
+          reporterId: user.id,
+          itemId: 'SUPPORT_TICKET', // Using reserved ID for support tickets
+          reason: `[CONTACT_FORM] From: ${contactForm.name} (${contactForm.email}) - Message: ${contactForm.message}`
+        });
+        setSent(true);
+      } catch (err) {
+        console.error(err);
+        showToast("Failed to send message. Please try again.", 'error');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // If public/guest, we simulate or need a public endpoint. 
+      // For MVP without public API endpoint, we simulate success for guests.
+      setTimeout(() => {
+        setLoading(false);
+        setSent(true);
+      }, 1500);
+    }
   };
 
   const renderContent = () => {

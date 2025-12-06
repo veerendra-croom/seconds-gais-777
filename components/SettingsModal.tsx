@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { X, Bell, Lock, Shield, Trash2, Loader2, Save, LogOut } from 'lucide-react';
+
+import React, { useState, useEffect } from 'react';
+import { X, Bell, Lock, Shield, Trash2, Loader2, Save, LogOut, Ban, Unlock } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { useToast } from './Toast';
+import { api } from '../services/api';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -10,8 +12,9 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, userEmail }) => {
-  const [activeTab, setActiveTab] = useState<'NOTIFICATIONS' | 'SECURITY' | 'PRIVACY'>('NOTIFICATIONS');
+  const [activeTab, setActiveTab] = useState<'NOTIFICATIONS' | 'SECURITY' | 'PRIVACY' | 'BLOCKED'>('NOTIFICATIONS');
   const [loading, setLoading] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
   const { showToast } = useToast();
 
   const [settings, setSettings] = useState({
@@ -24,6 +27,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, u
 
   // Password Change State
   const [passwords, setPasswords] = useState({ new: '', confirm: '' });
+
+  useEffect(() => {
+    if (activeTab === 'BLOCKED') {
+       loadBlockedUsers();
+    }
+  }, [activeTab]);
+
+  const loadBlockedUsers = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+       const blocks = await api.getBlockedUsers(user.id);
+       setBlockedUsers(blocks);
+    }
+  };
+
+  const handleUnblock = async (blockedId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    try {
+      await api.unblockUser(user.id, blockedId);
+      setBlockedUsers(prev => prev.filter(u => u.id !== blockedId));
+      showToast("User unblocked", 'success');
+    } catch (e) {
+      showToast("Failed to unblock", 'error');
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -68,8 +97,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, u
   const handleDeleteAccount = async () => {
     const confirmation = prompt("Type 'DELETE' to confirm account deletion. This cannot be undone.");
     if (confirmation === 'DELETE') {
-       showToast("Account deletion request submitted.", 'info');
-       onClose();
+       try {
+         const { data: { user } } = await supabase.auth.getUser();
+         if (user) {
+            await api.deleteAccount(user.id);
+            showToast("Account deleted.", 'success');
+            onClose();
+            // App will auto-redirect due to auth state change
+         }
+       } catch (e) {
+         console.error(e);
+         showToast("Failed to delete account. Try again later.", 'error');
+       }
     }
   };
 
@@ -99,6 +138,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, u
               >
                 <Shield size={18} /> Privacy
               </button>
+              <button 
+                onClick={() => setActiveTab('BLOCKED')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-bold ${activeTab === 'BLOCKED' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                <Ban size={18} /> Blocked
+              </button>
            </nav>
         </div>
 
@@ -109,6 +154,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, u
                 {activeTab === 'NOTIFICATIONS' && 'Notification Preferences'}
                 {activeTab === 'SECURITY' && 'Login & Security'}
                 {activeTab === 'PRIVACY' && 'Privacy Controls'}
+                {activeTab === 'BLOCKED' && 'Blocked Users'}
               </h3>
               <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                 <X size={20} className="text-slate-500" />
@@ -215,6 +261,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, u
                         <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${settings.publicEmail ? 'left-7' : 'left-1'}`}></div>
                       </button>
                    </div>
+                </div>
+              )}
+
+              {activeTab === 'BLOCKED' && (
+                <div className="space-y-4">
+                   {blockedUsers.length === 0 ? (
+                      <p className="text-center text-slate-400 py-10">You haven't blocked anyone.</p>
+                   ) : blockedUsers.map(user => (
+                      <div key={user.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                         <div className="flex items-center gap-3">
+                            <img src={user.avatar || `https://ui-avatars.com/api/?name=${user.name}`} className="w-10 h-10 rounded-full" />
+                            <span className="font-bold text-slate-800">{user.name}</span>
+                         </div>
+                         <button 
+                           onClick={() => handleUnblock(user.id)}
+                           className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 flex items-center gap-2"
+                         >
+                           <Unlock size={14} /> Unblock
+                         </button>
+                      </div>
+                   ))}
                 </div>
               )}
 

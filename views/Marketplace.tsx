@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { Item, ModuleType, Category, College } from '../types';
 import { ItemCard } from '../components/ItemCard';
-import { Filter, ChevronLeft, Search, SlidersHorizontal, Loader2, RefreshCw, MapPin, ArrowDown } from 'lucide-react';
+import { Filter, ChevronLeft, Search, SlidersHorizontal, Loader2, RefreshCw, MapPin, ArrowDown, Plus, X, Check } from 'lucide-react';
 import { api } from '../services/api';
 import { DEFAULT_COLLEGE_COORDS } from '../constants';
 import { useToast } from '../components/Toast';
@@ -12,20 +11,30 @@ interface MarketplaceProps {
   onBack: () => void;
   onItemClick?: (item: Item) => void;
   initialSearchQuery?: string;
+  onSellClick?: () => void;
 }
 
-export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemClick, initialSearchQuery }) => {
+export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemClick, initialSearchQuery, onSellClick }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [sortBy, setSortBy] = useState<'NEWEST' | 'NEAREST'>('NEWEST');
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [collegeCoords, setCollegeCoords] = useState<Record<string, { lat: number, lng: number }>>({});
   const { showToast } = useToast();
   
+  // Filter & Sort State
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    minPrice: '',
+    maxPrice: '',
+    sortBy: 'NEWEST' as 'NEWEST' | 'PRICE_ASC' | 'PRICE_DESC' | 'NEAREST',
+  });
+  // Active filters applied to API
+  const [activeFilters, setActiveFilters] = useState(filters);
+
   // Pagination State
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -43,15 +52,15 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
   }, []);
 
   useEffect(() => {
-    // Reset when type or query changes
+    // Reset when type, category, query, or filters change
     setPage(0);
     setHasMore(true);
     setItems([]);
     fetchItems(0);
-  }, [type, selectedCategory, searchQuery]); 
+  }, [type, selectedCategory, searchQuery, activeFilters]); 
 
   useEffect(() => {
-    if (sortBy === 'NEAREST') {
+    if (activeFilters.sortBy === 'NEAREST') {
       if (!userLocation) {
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
@@ -64,29 +73,48 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
             (error) => {
               console.error("Geo error", error);
               showToast("Could not access location. Sorting by newest.", 'error');
-              setSortBy('NEWEST');
+              setFilters(prev => ({...prev, sortBy: 'NEWEST'}));
+              setActiveFilters(prev => ({...prev, sortBy: 'NEWEST'}));
             }
           );
         }
       }
     }
-  }, [sortBy]);
+  }, [activeFilters.sortBy]);
 
   const fetchItems = async (pageNumber: number) => {
     if (pageNumber === 0) setLoading(true);
     else setLoadingMore(true);
 
     try {
-      const data = await api.getItems(type, selectedCategory, searchQuery, undefined, pageNumber, LIMIT);
+      const filterParams = {
+        minPrice: activeFilters.minPrice ? parseFloat(activeFilters.minPrice) : undefined,
+        maxPrice: activeFilters.maxPrice ? parseFloat(activeFilters.maxPrice) : undefined,
+        sortBy: activeFilters.sortBy
+      };
+
+      const data = await api.getItems(type, selectedCategory, searchQuery, filterParams, pageNumber, LIMIT);
       
       if (data.length < LIMIT) {
         setHasMore(false);
       }
 
+      // Client-side sorting for "Nearest" since it depends on dynamic user location
+      let resultData = data;
+      if (activeFilters.sortBy === 'NEAREST' && userLocation) {
+         resultData = data.sort((a, b) => {
+            const coordsA = collegeCoords[a.college] || DEFAULT_COLLEGE_COORDS;
+            const coordsB = collegeCoords[b.college] || DEFAULT_COLLEGE_COORDS;
+            const distA = getDistance(userLocation.lat, userLocation.lng, coordsA.lat, coordsA.lng);
+            const distB = getDistance(userLocation.lat, userLocation.lng, coordsB.lat, coordsB.lng);
+            return distA - distB;
+         });
+      }
+
       if (pageNumber === 0) {
-        setItems(data);
+        setItems(resultData);
       } else {
-        setItems(prev => [...prev, ...data]);
+        setItems(prev => [...prev, ...resultData]);
       }
     } catch (error) {
       console.error("Failed to fetch items", error);
@@ -96,6 +124,18 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
       setRefreshing(false);
       setLoadingMore(false);
     }
+  };
+
+  const handleApplyFilters = () => {
+    setActiveFilters(filters);
+    setShowFilters(false);
+  };
+
+  const handleClearFilters = () => {
+    const reset = { minPrice: '', maxPrice: '', sortBy: 'NEWEST' as const };
+    setFilters(reset);
+    setActiveFilters(reset);
+    setShowFilters(false);
   };
 
   const handleLoadMore = () => {
@@ -127,19 +167,6 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
 
   const deg2rad = (deg: number) => deg * (Math.PI/180);
 
-  const sortedItems = [...items].sort((a, b) => {
-    if (sortBy === 'NEAREST' && userLocation) {
-      const coordsA = collegeCoords[a.college] || DEFAULT_COLLEGE_COORDS;
-      const coordsB = collegeCoords[b.college] || DEFAULT_COLLEGE_COORDS;
-      
-      const distA = getDistance(userLocation.lat, userLocation.lng, coordsA.lat, coordsA.lng);
-      const distB = getDistance(userLocation.lat, userLocation.lng, coordsB.lat, coordsB.lng);
-      
-      return distA - distB;
-    }
-    return 0;
-  });
-
   const getTitle = () => {
     switch(type) {
       case 'BUY': return 'Buy Items';
@@ -152,8 +179,15 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
     }
   };
 
+  // Count active filters
+  const activeCount = [
+    activeFilters.minPrice, 
+    activeFilters.maxPrice, 
+    activeFilters.sortBy !== 'NEWEST'
+  ].filter(Boolean).length;
+
   return (
-    <div className="pb-24 md:pb-8 bg-slate-50 min-h-screen">
+    <div className="pb-24 md:pb-8 bg-slate-50 min-h-screen relative">
       {/* Header */}
       <div className="sticky top-0 bg-white/95 backdrop-blur-md z-30 shadow-sm border-b border-slate-100 transition-all">
         <div className="max-w-7xl mx-auto">
@@ -187,7 +221,7 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
             </div>
           </div>
           
-          <div className="border-t border-slate-50 md:border-none">
+          <div className="border-t border-slate-50 md:border-none relative">
             <div className="flex overflow-x-auto px-4 py-3 space-x-3 no-scrollbar items-center">
               <button
                 onClick={() => setSelectedCategory('All')}
@@ -213,6 +247,8 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
                 </button>
               ))}
             </div>
+            {/* Visual Fade Indicator for Scrolling */}
+            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none md:hidden"></div>
           </div>
         </div>
       </div>
@@ -223,14 +259,21 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
             Showing <span className="text-slate-900 font-bold">{loading ? '...' : items.length}</span> results
           </p>
           <div className="flex gap-2">
-            <select 
-              value={sortBy} 
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="text-xs font-medium text-slate-700 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm outline-none"
+            <button 
+              onClick={() => setShowFilters(true)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-xs font-bold transition-all relative ${
+                activeCount > 0 
+                  ? 'bg-slate-900 text-white border-slate-900' 
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
             >
-              <option value="NEWEST">Newest First</option>
-              <option value="NEAREST">Nearest to Me</option>
-            </select>
+              <SlidersHorizontal size={14} /> Filters
+              {activeCount > 0 && (
+                <span className="bg-white text-slate-900 w-4 h-4 rounded-full text-[10px] flex items-center justify-center">
+                  {activeCount}
+                </span>
+              )}
+            </button>
             
             <button 
               onClick={handleRefresh}
@@ -251,10 +294,10 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
               </div>
             ))}
           </div>
-        ) : sortedItems.length > 0 ? (
+        ) : items.length > 0 ? (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 lg:gap-8 mb-8">
-              {sortedItems.map((item, index) => (
+              {items.map((item, index) => (
                 <div key={item.id} className="animate-in fade-in zoom-in duration-500" style={{ animationDelay: `${(index % LIMIT) * 50}ms` }}>
                   <ItemCard item={item} onClick={() => onItemClick && onItemClick(item)} />
                 </div>
@@ -286,10 +329,112 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
               <Search size={48} className="text-slate-300" />
             </div>
             <h3 className="text-lg font-semibold text-slate-700">No items found</h3>
-            <p className="text-sm">Be the first to list something in this category!</p>
+            <p className="text-sm mb-6">Try adjusting your search or filters.</p>
+            {activeCount > 0 && (
+               <button 
+                 onClick={handleClearFilters}
+                 className="text-primary-600 font-bold text-sm hover:underline"
+               >
+                 Clear all filters
+               </button>
+            )}
+            {onSellClick && !activeCount && (
+              <button 
+                onClick={onSellClick}
+                className="mt-4 flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-full font-bold text-sm hover:bg-slate-800 transition-colors shadow-lg active:scale-95"
+              >
+                <Plus size={18} /> Sell an Item
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Filter Drawer Overlay */}
+      {showFilters && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+           <div className="absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity" onClick={() => setShowFilters(false)}></div>
+           
+           <div className="relative w-full max-w-sm bg-white h-full shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                 <h3 className="font-bold text-lg text-slate-900">Filters</h3>
+                 <button onClick={() => setShowFilters(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                    <X size={20} />
+                 </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                 {/* Sort */}
+                 <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase">Sort By</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                       {[
+                         { id: 'NEWEST', label: 'Newest First' },
+                         { id: 'PRICE_ASC', label: 'Price: Low to High' },
+                         { id: 'PRICE_DESC', label: 'Price: High to Low' },
+                         { id: 'NEAREST', label: 'Nearest to Me' }
+                       ].map(opt => (
+                         <button
+                           key={opt.id}
+                           onClick={() => setFilters(prev => ({...prev, sortBy: opt.id as any}))}
+                           className={`px-4 py-3 rounded-xl text-xs font-bold transition-all border ${
+                             filters.sortBy === opt.id 
+                               ? 'bg-slate-900 text-white border-slate-900' 
+                               : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                           }`}
+                         >
+                           {opt.label}
+                         </button>
+                       ))}
+                    </div>
+                 </div>
+
+                 {/* Price Range */}
+                 <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase">Price Range</h4>
+                    <div className="flex items-center gap-4">
+                       <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                          <input 
+                            type="number" 
+                            placeholder="Min" 
+                            className="w-full pl-6 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary-500"
+                            value={filters.minPrice}
+                            onChange={(e) => setFilters(prev => ({...prev, minPrice: e.target.value}))}
+                          />
+                       </div>
+                       <span className="text-slate-300">-</span>
+                       <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                          <input 
+                            type="number" 
+                            placeholder="Max" 
+                            className="w-full pl-6 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary-500"
+                            value={filters.maxPrice}
+                            onChange={(e) => setFilters(prev => ({...prev, maxPrice: e.target.value}))}
+                          />
+                       </div>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="p-6 border-t border-slate-100 flex gap-4 bg-white pb-safe">
+                 <button 
+                   onClick={handleClearFilters}
+                   className="flex-1 py-3 text-slate-500 font-bold hover:text-slate-800 transition-colors"
+                 >
+                   Clear All
+                 </button>
+                 <button 
+                   onClick={handleApplyFilters}
+                   className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                 >
+                   Show Results
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

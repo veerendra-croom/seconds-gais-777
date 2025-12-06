@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Item } from '../types';
 import { MapPin, Star, ShieldCheck, Heart, Layers } from 'lucide-react';
@@ -14,6 +13,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({ item, onClick }) => {
   const isService = item.type === 'SERVICE';
   const isRequest = item.type === 'REQUEST';
   const hasMultipleImages = item.images && item.images.length > 1;
+  const isSold = item.status === 'SOLD';
 
   return (
     <div 
@@ -24,15 +24,24 @@ export const ItemCard: React.FC<ItemCardProps> = ({ item, onClick }) => {
         <img 
           src={item.image} 
           alt={item.title} 
-          className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+          className={`w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110 ${isSold ? 'grayscale opacity-70' : ''}`}
           loading="lazy"
         />
+        
+        {isSold && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-20">
+             <span className="bg-red-600 text-white font-black text-xs px-3 py-1 rounded shadow-lg transform -rotate-6 tracking-widest uppercase border-2 border-white">SOLD</span>
+          </div>
+        )}
+
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
         
         {/* Glass Badge */}
-        <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full shadow-lg shadow-black/5 z-10 flex items-center justify-center">
-          <span className="text-[10px] font-bold text-slate-900 uppercase tracking-wider">{item.type}</span>
-        </div>
+        {!isSold && (
+          <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full shadow-lg shadow-black/5 z-10 flex items-center justify-center">
+            <span className="text-[10px] font-bold text-slate-900 uppercase tracking-wider">{item.type}</span>
+          </div>
+        )}
         
         {hasMultipleImages && (
           <div className="absolute top-3 left-3 bg-black/40 backdrop-blur-md text-white px-2 py-1 rounded-lg shadow-sm z-10 flex items-center gap-1.5">

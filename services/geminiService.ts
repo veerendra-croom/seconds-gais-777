@@ -1,9 +1,8 @@
-
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize the Gemini API client
-const apiKey = process.env.API_KEY || 'dummy-key-for-demo'; 
-const ai = new GoogleGenAI({ apiKey });
+// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
 /**
  * Generates a creative and effective description for an item being sold/listed.
@@ -49,7 +48,7 @@ export const generateItemDescription = async (
  */
 export const suggestPrice = async (itemTitle: string): Promise<string> => {
    try {
-    if (!process.env.API_KEY) return "AI unavailable";
+    if (!process.env.API_KEY) return "N/A";
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -102,3 +101,73 @@ export const analyzeImageForSearch = async (file: File): Promise<string> => {
     return "";
   }
 }
+
+/**
+ * Generates context-aware smart replies for chat.
+ */
+export const generateSmartReplies = async (
+  lastMessages: { sender: 'ME' | 'THEM', content: string }[],
+  itemContext?: string
+): Promise<string[]> => {
+  try {
+    if (!process.env.API_KEY || lastMessages.length === 0) {
+      return ["Is this available?", "Interested!", "Can we meet?"];
+    }
+
+    const contextStr = lastMessages.map(m => `${m.sender}: ${m.content}`).join('\n');
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `
+        You are a smart assistant for a student marketplace chat.
+        Context Item: ${itemContext || 'General Chat'}
+        
+        Recent Conversation:
+        ${contextStr}
+        
+        Generate 3 short, polite, and relevant responses that "ME" could send next. 
+        Keep them under 10 words. 
+        Return ONLY the 3 responses separated by pipes (|).
+        Example: Yes, it is available.|Would 2pm work?|I can meet at the library.
+      `,
+    });
+
+    const text = response.text?.trim() || "";
+    const replies = text.split('|').map(s => s.trim()).filter(s => s.length > 0);
+    return replies.length >= 1 ? replies.slice(0, 3) : ["Is this available?", "Interested!", "Can we meet?"];
+  } catch (e) {
+    return ["Is this available?", "Interested!", "Can we meet?"];
+  }
+};
+
+/**
+ * Analyzes market price for an item description.
+ */
+export const analyzePrice = async (title: string, price: number): Promise<{ verdict: string, estimatedRange: string, reason: string }> => {
+  try {
+    if (!process.env.API_KEY) return { verdict: 'Unknown', estimatedRange: '$-', reason: 'AI unavailable' };
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `
+        Analyze the price of this used item: "${title}" listed for $${price}.
+        Estimate the typical used market price range.
+        Determine if it is a "Great Deal", "Fair Price", or "Overpriced".
+        Provide a 1 sentence reason.
+        
+        Return JSON format:
+        { "verdict": "Great Deal", "estimatedRange": "$10 - $15", "reason": "Typically sells for $20 used." }
+      `
+    });
+
+    // Simple JSON extraction
+    const text = response.text?.trim();
+    const jsonMatch = text?.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return { verdict: 'Fair Price', estimatedRange: 'Unknown', reason: 'Could not analyze market data.' };
+  } catch (e) {
+    return { verdict: 'Unknown', estimatedRange: '$-', reason: 'Analysis failed.' };
+  }
+};

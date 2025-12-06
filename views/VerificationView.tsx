@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Camera, Upload, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
+import { Camera, Upload, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface VerificationViewProps {
@@ -12,18 +13,21 @@ export const VerificationView: React.FC<VerificationViewProps> = ({ onVerificati
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
       setPreview(URL.createObjectURL(selectedFile));
+      setError(null);
     }
   };
 
   const handleUpload = async () => {
     if (!file || !userId) return;
     setUploading(true);
+    setError(null);
 
     try {
       // 1. Upload to Supabase Storage
@@ -37,15 +41,10 @@ export const VerificationView: React.FC<VerificationViewProps> = ({ onVerificati
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) {
-        // Fallback for demo if bucket doesn't exist
-        console.warn("Upload failed (bucket might be missing), proceeding with mock verification", uploadError);
+        throw new Error(`Upload Failed: ${uploadError.message}`);
       }
 
-      // 2. Update User Profile Status
-      // Ideally this triggers a 'PENDING' state, but for this demo flow we might auto-approve or mark pending
-      // Since we don't have a backend admin panel active, we will simulate "submission success"
-      
-      // Update local state to show success
+      // 2. Success Logic
       setCompleted(true);
       
       // Delay to show success animation before redirect
@@ -53,8 +52,9 @@ export const VerificationView: React.FC<VerificationViewProps> = ({ onVerificati
         onVerificationComplete();
       }, 2000);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Verification error:", error);
+      setError(error.message || "An unexpected error occurred.");
     } finally {
       setUploading(false);
     }
@@ -119,6 +119,13 @@ export const VerificationView: React.FC<VerificationViewProps> = ({ onVerificati
              <div className="shrink-0 mt-0.5">⚠️</div>
              <p>Your ID card must clearly show your <strong>Name</strong>, <strong>College Name</strong>, and <strong>Expiration Date</strong>.</p>
           </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex gap-2 items-start text-red-600 text-sm">
+               <AlertCircle size={16} className="mt-0.5 shrink-0" />
+               <p>{error}</p>
+            </div>
+          )}
 
           <button 
             onClick={handleUpload}

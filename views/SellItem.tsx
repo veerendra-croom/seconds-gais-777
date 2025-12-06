@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, Camera, Sparkles, Loader2, X, AlertCircle, Upload, Save, Trash2, Image as ImageIcon, Plus, ArrowLeft, ArrowRight, RefreshCw, GripHorizontal } from 'lucide-react';
 import { generateItemDescription, suggestPrice } from '../services/geminiService';
@@ -245,6 +244,13 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       return;
     }
     
+    // Price Validation
+    const priceVal = parseFloat(formData.price);
+    if (formData.price && (isNaN(priceVal) || priceVal < 0)) {
+      showToast("Price must be a positive number.", 'error');
+      return;
+    }
+    
     const pendingUploads = images.some(i => i.status === 'uploading' || i.status === 'pending');
     if (pendingUploads) {
       showToast("Please wait for uploads to finish.", 'error');
@@ -273,13 +279,13 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       const itemData = {
         title: formData.title,
         description: formData.description,
-        price: parseFloat(formData.price) || 0,
+        price: Math.abs(parseFloat(formData.price)) || 0, // Ensure positive
         category: formData.category,
         type: formData.type as any,
         images: validImageUrls,
         image: validImageUrls[0] || '',
         status: status,
-        originalPrice: parseFloat(formData.price) * 1.2 || 0,
+        originalPrice: Math.abs(parseFloat(formData.price)) * 1.2 || 0,
       };
 
       if (itemToEdit) {
@@ -490,6 +496,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">{formData.type === 'REQUEST' ? 'Max Budget ($)' : 'Price ($)'}</label>
                 <input 
                   type="number"
+                  min="0"
                   value={formData.price}
                   onChange={(e) => setFormData({...formData, price: e.target.value})}
                   placeholder="0.00"

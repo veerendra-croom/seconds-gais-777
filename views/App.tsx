@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './services/supabaseClient';
-import { api } from './services/api';
-import { UserProfile, Item, Conversation, ModuleType, Notification } from './types';
-import { ToastProvider, useToast } from './components/Toast';
-import { Navigation } from './components/Navigation';
+import { supabase } from '../services/supabaseClient';
+import { api } from '../services/api';
+import { UserProfile, Item, Conversation, ModuleType, Notification } from '../types';
+import { ToastProvider, useToast } from '../components/Toast';
+import { Navigation } from '../components/Navigation';
 import { SplashView } from './views/SplashView';
 import { LandingView } from './views/LandingView';
 import { AuthView } from './views/AuthView';
@@ -19,6 +19,7 @@ import { CollegeLinkView } from './views/CollegeLinkView';
 import { AdminDashboard } from './views/AdminDashboard';
 import { StaticPages } from './views/StaticPages';
 import { OnboardingTour } from './components/OnboardingTour';
+import { WifiOff } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -33,6 +34,7 @@ const AppContent: React.FC = () => {
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [showTour, setShowTour] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   // Sidebar State for Desktop (Auto-closed on smaller desktops/tablets)
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
@@ -40,6 +42,12 @@ const AppContent: React.FC = () => {
   const { showToast } = useToast();
 
   useEffect(() => {
+    // Online/Offline Listeners
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -71,8 +79,15 @@ const AppContent: React.FC = () => {
     return () => {
       subscription.unsubscribe();
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Scroll to top on view change
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [currentView]);
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -243,7 +258,7 @@ const AppContent: React.FC = () => {
           : <div className="p-20 text-center">Loading Profile...</div>;
       case 'ITEM_DETAIL': 
         if (!selectedItem) return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
-        return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={() => setCurrentView('HOME')} onChat={handleStartChat} onViewProfile={handleViewProfile} />;
+        return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={() => setCurrentView('HOME')} onChat={handleStartChat} onViewProfile={handleViewProfile} onItemClick={handleItemClick} />;
       case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={() => setCurrentView('HOME')} />;
       case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={() => setCurrentView('CHAT_LIST')} onViewItem={handleViewItemFromChat} />;
       case 'BUY':
@@ -252,7 +267,13 @@ const AppContent: React.FC = () => {
       case 'SWAP':
       case 'EARN':
       case 'REQUEST':
-        return <Marketplace type={currentView} onBack={() => setCurrentView('HOME')} onItemClick={handleItemClick} initialSearchQuery={globalSearchQuery} />;
+        return <Marketplace 
+          type={currentView} 
+          onBack={() => setCurrentView('HOME')} 
+          onItemClick={handleItemClick} 
+          initialSearchQuery={globalSearchQuery} 
+          onSellClick={() => setCurrentView('SELL')}
+        />;
       default: return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
     }
   };
@@ -265,6 +286,13 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       
+      {/* Offline Indicator */}
+      {isOffline && (
+        <div className="bg-slate-900 text-white text-xs font-bold py-2 text-center fixed top-0 left-0 right-0 z-[100] flex items-center justify-center gap-2 animate-slide-up">
+           <WifiOff size={14} /> You are offline. Some features may be unavailable.
+        </div>
+      )}
+
       {/* Show Navigation only for authenticated main views */}
       {showSidebar && (
         <Navigation 
@@ -279,7 +307,7 @@ const AppContent: React.FC = () => {
          Main Content Wrapper 
          Adjusts left padding on desktop when sidebar is open to prevent overlapping 
       */}
-      <main className={`transition-all duration-300 ease-in-out ${showSidebar && isSidebarOpen ? 'md:pl-64' : ''}`}>
+      <main className={`transition-all duration-300 ease-in-out ${showSidebar && isSidebarOpen ? 'md:pl-64' : ''} ${isOffline ? 'pt-8' : ''}`}>
         {renderView()}
       </main>
 

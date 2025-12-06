@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserProfile } from '../types';
+import { UserProfile, BankAccount } from '../types';
 import { api } from '../services/api';
-import { X, CreditCard, ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, Loader2, Building, AlertCircle } from 'lucide-react';
+import { X, CreditCard, ArrowUpRight, ArrowDownLeft, Clock, CheckCircle2, Loader2, Building, AlertCircle, Plus, Trash2 } from 'lucide-react';
 
 interface WalletModalProps {
   isOpen: boolean;
@@ -14,11 +14,13 @@ interface WalletModalProps {
 export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, user, onUpdate }) => {
   const [activeTab, setActiveTab] = useState<'HISTORY' | 'WITHDRAW'>('HISTORY');
   const [history, setHistory] = useState<{credits: any[], debits: any[]}>({ credits: [], debits: [] });
+  const [savedBanks, setSavedBanks] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Withdrawal State
   const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [bankInfo, setBankInfo] = useState({ bankName: '', accountNo: '' });
+  const [bankInfo, setBankInfo] = useState({ bankName: '', accountNo: '', holderName: '' });
+  const [saveBank, setSaveBank] = useState(false);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -26,6 +28,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, user,
   useEffect(() => {
     if (isOpen) {
       loadHistory();
+      loadBanks();
     }
   }, [isOpen]);
 
@@ -38,6 +41,23 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, user,
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBanks = async () => {
+    const banks = await api.getBankAccounts(user.id);
+    setSavedBanks(banks);
+  };
+
+  const handleSelectBank = (bank: BankAccount) => {
+    setBankInfo({ bankName: bank.bankName, accountNo: `****${bank.last4}`, holderName: bank.holderName });
+  };
+
+  const handleDeleteBank = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if(confirm("Remove this bank account?")) {
+       await api.deleteBankAccount(id);
+       loadBanks();
     }
   };
 
@@ -58,6 +78,16 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, user,
     setWithdrawLoading(true);
     try {
       await api.withdrawFunds(user.id, amount);
+      
+      if (saveBank && !bankInfo.accountNo.includes('*')) {
+         await api.addBankAccount(user.id, {
+            bankName: bankInfo.bankName,
+            last4: bankInfo.accountNo.slice(-4),
+            holderName: bankInfo.holderName
+         });
+         loadBanks();
+      }
+
       setSuccess(true);
       onUpdate(); // Update parent profile state
       setTimeout(() => {
@@ -140,10 +170,45 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, user,
                         </div>
                      </div>
 
+                     {savedBanks.length > 0 && (
+                        <div>
+                           <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Saved Accounts</label>
+                           <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                              {savedBanks.map(bank => (
+                                 <div 
+                                   key={bank.id} 
+                                   onClick={() => handleSelectBank(bank)}
+                                   className="min-w-[140px] p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-primary-500 transition-colors relative group"
+                                 >
+                                    <div className="flex items-center gap-2 mb-1">
+                                       <Building size={16} className="text-slate-400"/>
+                                       <span className="font-bold text-xs text-slate-700 truncate">{bank.bankName}</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500">****{bank.last4}</p>
+                                    <button 
+                                      onClick={(e) => handleDeleteBank(e, bank.id)}
+                                      className="absolute top-1 right-1 p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                       <Trash2 size={12} />
+                                    </button>
+                                 </div>
+                              ))}
+                           </div>
+                        </div>
+                     )}
+
                      <div className="space-y-4">
                         <h4 className="font-bold text-slate-700 text-sm flex items-center gap-2">
                            <Building size={16} /> Bank Details
                         </h4>
+                        <input 
+                          type="text" 
+                          placeholder="Account Holder Name" 
+                          required
+                          className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary-500"
+                          value={bankInfo.holderName}
+                          onChange={e => setBankInfo({...bankInfo, holderName: e.target.value})}
+                        />
                         <input 
                           type="text" 
                           placeholder="Bank Name" 
@@ -160,6 +225,10 @@ export const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, user,
                           value={bankInfo.accountNo}
                           onChange={e => setBankInfo({...bankInfo, accountNo: e.target.value})}
                         />
+                        <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                           <input type="checkbox" checked={saveBank} onChange={e => setSaveBank(e.target.checked)} className="rounded text-primary-600 focus:ring-primary-500"/>
+                           Save this account for later
+                        </label>
                      </div>
 
                      {error && (

@@ -1,14 +1,15 @@
-
 import React from 'react';
-import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut } from 'lucide-react';
+import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { ModuleType } from '../types';
 
 interface NavigationProps {
   currentView: ModuleType;
   setView: (view: ModuleType) => void;
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: (isOpen: boolean) => void;
 }
 
-export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) => {
+export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, isSidebarOpen, setIsSidebarOpen }) => {
   const navItems = [
     { id: 'HOME', icon: Home, label: 'Home' },
     { id: 'BUY', icon: ShoppingBag, label: 'Shop', activeMatch: ['BUY', 'RENT', 'SHARE', 'SWAP', 'EARN', 'ITEM_DETAIL'] },
@@ -57,16 +58,38 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) 
         </div>
       </div>
 
+      {/* Desktop Sidebar Toggle (Visible when sidebar is closed) */}
+      <button 
+        onClick={() => setIsSidebarOpen(true)}
+        className={`hidden md:flex fixed top-4 left-4 z-40 p-2.5 bg-white text-slate-600 hover:text-slate-900 rounded-xl shadow-md border border-slate-100 hover:bg-slate-50 transition-all duration-300 ${isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        title="Open Sidebar"
+      >
+        <PanelLeftOpen size={24} />
+      </button>
+
       {/* Desktop Sidebar */}
-      <div className="hidden md:flex fixed left-0 top-0 bottom-0 w-64 bg-white border-r border-slate-100 flex-col z-50 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-        <div className="p-8">
+      <div 
+        className={`
+          hidden md:flex fixed left-0 top-0 bottom-0 w-64 bg-white border-r border-slate-100 flex-col z-50 
+          shadow-[4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 ease-in-out
+          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
+        <div className="p-8 flex items-center justify-between">
           <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2 tracking-tight">
             <div className="w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center text-white text-lg shadow-lg shadow-slate-900/20">S</div>
             Seconds
           </h1>
+          <button 
+            onClick={() => setIsSidebarOpen(false)} 
+            className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+            title="Collapse Sidebar"
+          >
+            <PanelLeftClose size={24} />
+          </button>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2">
+        <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = currentView === item.id || (item.activeMatch && item.activeMatch.includes(currentView));
             const Icon = item.icon;

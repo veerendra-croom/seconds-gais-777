@@ -1,5 +1,5 @@
 
-export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE' | 'ITEM_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'LANDING' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS';
+export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS';
 
 export enum Category {
   ELECTRONICS = 'Electronics',
@@ -52,6 +52,12 @@ export interface UserProfile {
   avatar: string;
   verificationStatus: 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   banned?: boolean;
+  bio?: string;
+  socialLinks?: {
+    instagram?: string;
+    linkedin?: string;
+    website?: string;
+  };
 }
 
 export interface Badge {
@@ -76,6 +82,7 @@ export interface Message {
   receiverId: string;
   itemId?: string;
   content: string;
+  image?: string;
   createdAt: string;
   isRead: boolean;
 }
@@ -156,4 +163,11 @@ export interface Notification {
   isRead: boolean;
   link?: string;
   createdAt: string;
+}
+
+export interface BankAccount {
+  id: string;
+  bankName: string;
+  last4: string;
+  holderName: string;
 }

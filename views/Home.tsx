@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ModuleType, Item, UserProfile, Notification } from '../types';
-import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History } from 'lucide-react';
+import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
 import { analyzeImageForSearch } from '../services/geminiService';
 import { useToast } from '../components/Toast';
+import { SustainabilityModal } from '../components/SustainabilityModal';
 
 interface HomeProps {
   user: UserProfile;
-  onModuleSelect: (module: ModuleType) => void;
+  onModuleSelect: (module: ModuleType, params?: any) => void;
   onItemClick?: (item: Item) => void;
   onSearch: (query: string) => void;
+  onNotificationClick?: (notification: Notification) => void;
 }
 
 const modules = [
@@ -23,13 +25,15 @@ const modules = [
   { id: 'REQUEST', label: 'Request', icon: HandHeart, color: 'bg-indigo-500', gradient: 'from-indigo-400 to-indigo-600' },
 ];
 
-export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch }) => {
+export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch, onNotificationClick }) => {
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showSustainability, setShowSustainability] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
@@ -75,8 +79,14 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     if (searchQuery.trim()) {
       const newHistory = [searchQuery, ...recentSearches.filter(q => q !== searchQuery)].slice(0, 5);
       localStorage.setItem('recent_searches', JSON.stringify(newHistory));
+      setRecentSearches(newHistory); // Update state immediately
       onSearch(searchQuery);
     }
+  };
+
+  const handleRecentClick = (term: string) => {
+    setSearchQuery(term);
+    onSearch(term);
   };
 
   const handleImageSearch = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -88,6 +98,11 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
         if (term) {
           setSearchQuery(term);
           showToast(`Found: ${term}`, 'success');
+          // Add to history
+          const newHistory = [term, ...recentSearches.filter(q => q !== term)].slice(0, 5);
+          localStorage.setItem('recent_searches', JSON.stringify(newHistory));
+          setRecentSearches(newHistory);
+          
           onSearch(term); 
         } else {
           showToast("Could not identify item.", 'error');
@@ -97,8 +112,82 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     }
   };
 
+  const startVoiceSearch = () => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setSearchQuery(transcript);
+        
+        // Save to history and search
+        const newHistory = [transcript, ...recentSearches.filter(q => q !== transcript)].slice(0, 5);
+        localStorage.setItem('recent_searches', JSON.stringify(newHistory));
+        setRecentSearches(newHistory);
+        onSearch(transcript);
+      };
+
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        showToast("Voice search error. Please try again.", 'error');
+      };
+
+      recognition.start();
+    } else {
+      showToast("Voice search not supported in this browser.", 'error');
+    }
+  };
+
+  const handleInternalNotificationClick = async (n: Notification) => {
+    // 1. Mark as read in DB
+    try {
+      await api.markNotificationAsRead(n.id);
+      setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, isRead: true } : notif));
+    } catch (e) {
+      console.error("Failed to mark notification read", e);
+    }
+
+    // 2. Navigation Logic
+    setShowNotifications(false);
+    if (onNotificationClick) {
+      onNotificationClick(n);
+    } else {
+      // Fallback if handler not provided
+      if (n.link === 'CHAT_LIST') onModuleSelect('CHAT_LIST');
+      else if (n.link === 'MY_ORDERS') onModuleSelect('MY_ORDERS');
+    }
+  };
+
   return (
-    <div className="pb-32 md:pb-8 max-w-7xl mx-auto min-h-screen">
+    <div className="pb-32 md:pb-8 max-w-7xl mx-auto min-h-screen relative">
+      {/* Voice Listening Overlay */}
+      {isListening && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
+           <div className="w-24 h-24 bg-red-500 rounded-full flex items-center justify-center animate-pulse shadow-[0_0_50px_rgba(239,68,68,0.5)]">
+              <Mic size={48} className="text-white" />
+           </div>
+           <p className="mt-8 text-white text-xl font-bold tracking-wide animate-bounce">Listening...</p>
+           <button 
+             onClick={() => window.location.reload()} // Quick way to stop if stuck, or implement proper stop
+             className="mt-8 px-6 py-2 bg-white/20 rounded-full text-white text-sm hover:bg-white/30 transition-colors"
+           >
+             Cancel
+           </button>
+        </div>
+      )}
+
       {/* Premium Header */}
       <header className="px-6 pt-12 pb-4 sticky top-0 md:static z-30 transition-all">
         <div className="flex justify-between items-center mb-6">
@@ -130,29 +219,62 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={analyzingImage ? "Analyzing..." : "Search items, services..."}
-              className="relative w-full bg-white/90 backdrop-blur-xl border border-white/50 rounded-2xl py-4 pl-12 pr-12 text-sm font-medium shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:shadow-[0_8px_30px_rgb(0,0,0,0.08)] outline-none transition-all placeholder:text-slate-400"
+              className="relative w-full bg-white/90 backdrop-blur-xl border border-white/50 rounded-2xl py-4 pl-12 pr-24 text-sm font-medium shadow-[0_8px_30px_rgb(0,0,0,0.04)] focus:shadow-[0_8px_30px_rgb(0,0,0,0.08)] outline-none transition-all placeholder:text-slate-400"
               disabled={analyzingImage}
             />
             <Search className="absolute left-4 top-4 text-slate-400" size={20} />
-            <button 
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="absolute right-3 top-3 p-1.5 text-slate-400 hover:text-primary-500 hover:bg-slate-100 rounded-lg transition-all"
-            >
-              {analyzingImage ? <Loader2 size={20} className="animate-spin"/> : <Camera size={20} />}
-            </button>
+            
+            <div className="absolute right-3 top-3 flex items-center gap-1">
+              <button 
+                type="button"
+                onClick={startVoiceSearch}
+                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                title="Voice Search"
+              >
+                <Mic size={20} />
+              </button>
+              <button 
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-slate-100 rounded-lg transition-all"
+                title="Image Search"
+              >
+                {analyzingImage ? <Loader2 size={20} className="animate-spin"/> : <Camera size={20} />}
+              </button>
+            </div>
             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSearch} />
           </form>
         </div>
+
+        {/* Recent Searches Chips */}
+        {recentSearches.length > 0 && !searchQuery && (
+          <div className="mt-4 flex gap-2 overflow-x-auto no-scrollbar pb-2 mask-linear-fade">
+            {recentSearches.map(term => (
+              <button 
+                key={term} 
+                onClick={() => handleRecentClick(term)} 
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/60 backdrop-blur border border-slate-200 rounded-full text-xs font-medium text-slate-600 hover:bg-white hover:shadow-sm hover:text-primary-600 transition-all whitespace-nowrap animate-in fade-in zoom-in duration-300"
+              >
+                <History size={12} className="text-slate-400"/> {term}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
 
-      {/* Holographic Stats Card */}
+      {/* Holographic Stats Card - Clickable now */}
       <div className="px-6 py-2 animate-slide-up">
-        <div className="holo-card rounded-[32px] p-8 text-white shadow-xl shadow-blue-500/20 relative overflow-hidden group">
+        <div 
+          onClick={() => setShowSustainability(true)}
+          className="holo-card rounded-[32px] p-8 text-white shadow-xl shadow-blue-500/20 relative overflow-hidden group cursor-pointer transition-transform hover:scale-[1.02] active:scale-95"
+        >
           <div className="relative z-10">
-             <div className="flex items-center space-x-2 text-blue-100 mb-2">
-                <Sparkles size={16} />
-                <span className="text-xs font-bold uppercase tracking-widest">Sustainability Impact</span>
+             <div className="flex items-center justify-between mb-2">
+               <div className="flex items-center space-x-2 text-blue-100">
+                  <Sparkles size={16} />
+                  <span className="text-xs font-bold uppercase tracking-widest">Sustainability Impact</span>
+               </div>
+               <ChevronRight size={16} className="text-white/70" />
              </div>
              <div className="flex items-baseline gap-1">
                 <span className="text-5xl font-black tracking-tighter">${user.savings || 0}</span>
@@ -161,16 +283,16 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
              
              <div className="mt-6 flex gap-8">
                 <div>
-                   <p className="text-2xl font-bold">12kg</p>
+                   <p className="text-2xl font-bold">{Math.floor((user.savings || 0) * 0.15)}kg</p>
                    <p className="text-xs text-blue-200 uppercase font-bold tracking-wider">CO₂ Saved</p>
                 </div>
                 <div>
-                   <p className="text-2xl font-bold">8</p>
-                   <p className="text-xs text-blue-200 uppercase font-bold tracking-wider">Items</p>
+                   <p className="text-2xl font-bold">Top 5%</p>
+                   <p className="text-xs text-blue-200 uppercase font-bold tracking-wider">Campus Rank</p>
                 </div>
              </div>
           </div>
-          <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
+          <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-white/10 rounded-full blur-3xl group-hover:scale-125 transition-transform duration-700"></div>
         </div>
       </div>
 
@@ -236,16 +358,25 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
               <div className="space-y-3">
                  {notifications.length === 0 ? <p className="text-center text-slate-400 py-10">No new alerts</p> : 
                    notifications.map(n => (
-                     <div key={n.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                        <p className="font-bold text-sm text-slate-900">{n.title}</p>
-                        <p className="text-xs text-slate-500 mt-1">{n.message}</p>
-                     </div>
+                     <button 
+                       key={n.id} 
+                       onClick={() => handleInternalNotificationClick(n)}
+                       className={`w-full text-left p-4 rounded-2xl border transition-all flex items-center justify-between group ${n.isRead ? 'bg-white border-slate-100' : 'bg-blue-50 border-blue-100'}`}
+                     >
+                        <div>
+                           <p className={`text-sm text-slate-900 ${n.isRead ? 'font-medium' : 'font-bold'}`}>{n.title}</p>
+                           <p className="text-xs text-slate-500 mt-1 line-clamp-1">{n.message}</p>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-300 group-hover:text-primary-500" />
+                     </button>
                    ))
                  }
               </div>
            </div>
         </div>
       )}
+
+      <SustainabilityModal isOpen={showSustainability} onClose={() => setShowSustainability(false)} user={user} />
     </div>
   );
 };
