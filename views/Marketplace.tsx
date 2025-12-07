@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Item, ModuleType, Category, College } from '../types';
+import { Item, ModuleType, Category, College, UserProfile } from '../types';
 import { ItemCard } from '../components/ItemCard';
-import { Filter, ChevronLeft, Search, SlidersHorizontal, Loader2, RefreshCw, MapPin, ArrowDown, Plus, X, Check } from 'lucide-react';
+import { Filter, ChevronLeft, Search, SlidersHorizontal, Loader2, RefreshCw, MapPin, ArrowDown, Plus, X, Check, Building2, Globe, ChevronDown, Bell, ShieldCheck, Star } from 'lucide-react';
 import { api } from '../services/api';
 import { DEFAULT_COLLEGE_COORDS } from '../constants';
 import { useToast } from '../components/Toast';
@@ -12,9 +12,10 @@ interface MarketplaceProps {
   onItemClick?: (item: Item) => void;
   initialSearchQuery?: string;
   onSellClick?: () => void;
+  user: UserProfile | null;
 }
 
-export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemClick, initialSearchQuery, onSellClick }) => {
+export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemClick, initialSearchQuery, onSellClick, user }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +32,9 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
     minPrice: '',
     maxPrice: '',
     sortBy: 'NEWEST' as 'NEWEST' | 'PRICE_ASC' | 'PRICE_DESC' | 'NEAREST',
+    college: user?.college || 'All', // Default to user college
+    verifiedOnly: false,
+    minRating: 0
   });
   // Active filters applied to API
   const [activeFilters, setActiveFilters] = useState(filters);
@@ -90,7 +94,10 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
       const filterParams = {
         minPrice: activeFilters.minPrice ? parseFloat(activeFilters.minPrice) : undefined,
         maxPrice: activeFilters.maxPrice ? parseFloat(activeFilters.maxPrice) : undefined,
-        sortBy: activeFilters.sortBy
+        sortBy: activeFilters.sortBy,
+        college: activeFilters.college,
+        verifiedOnly: activeFilters.verifiedOnly,
+        minRating: activeFilters.minRating
       };
 
       const data = await api.getItems(type, selectedCategory, searchQuery, filterParams, pageNumber, LIMIT);
@@ -132,10 +139,23 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
   };
 
   const handleClearFilters = () => {
-    const reset = { minPrice: '', maxPrice: '', sortBy: 'NEWEST' as const };
+    const reset = { 
+      minPrice: '', 
+      maxPrice: '', 
+      sortBy: 'NEWEST' as const, 
+      college: user?.college || 'All',
+      verifiedOnly: false,
+      minRating: 0
+    };
     setFilters(reset);
     setActiveFilters(reset);
     setShowFilters(false);
+  };
+
+  const handleExpandToAllColleges = () => {
+    const newFilters = { ...filters, college: 'All' };
+    setFilters(newFilters);
+    setActiveFilters(newFilters);
   };
 
   const handleLoadMore = () => {
@@ -150,6 +170,12 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
     setPage(0);
     setHasMore(true);
     fetchItems(0);
+  };
+
+  const handleSaveSearch = () => {
+    if (searchQuery) {
+      showToast(`Alert set for "${searchQuery}"`, 'success');
+    }
   };
 
   const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -179,11 +205,15 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
     }
   };
 
-  // Count active filters
+  // Count active filters (excluding college if it matches user's default)
+  const isDefaultCollege = activeFilters.college === (user?.college || 'All');
   const activeCount = [
     activeFilters.minPrice, 
     activeFilters.maxPrice, 
-    activeFilters.sortBy !== 'NEWEST'
+    activeFilters.sortBy !== 'NEWEST',
+    !isDefaultCollege,
+    activeFilters.verifiedOnly,
+    activeFilters.minRating > 0
   ].filter(Boolean).length;
 
   return (
@@ -196,9 +226,21 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
               <button onClick={onBack} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full md:hidden transition-colors">
                 <ChevronLeft size={24} />
               </button>
-              <h1 className="font-bold text-slate-800 text-xl md:text-2xl">
-                {getTitle()}
-              </h1>
+              <div>
+                <h1 className="font-bold text-slate-800 text-xl md:text-2xl leading-none">
+                  {getTitle()}
+                </h1>
+                <div className="flex items-center gap-1 mt-1">
+                   <button 
+                     onClick={() => setShowFilters(true)}
+                     className="flex items-center gap-1 text-xs font-bold text-primary-600 bg-primary-50 px-2 py-1 rounded-lg active:scale-95 transition-all border border-primary-100 hover:bg-primary-100"
+                   >
+                      <Building2 size={12} />
+                      {activeFilters.college === 'All' ? 'All Colleges' : activeFilters.college}
+                      <ChevronDown size={12} className="opacity-50" />
+                   </button>
+                </div>
+              </div>
             </div>
             
             <div className="hidden md:flex items-center space-x-3">
@@ -209,8 +251,17 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search in category..." 
-                  className="bg-slate-100 hover:bg-slate-50 focus:bg-white border border-transparent focus:border-primary-200 rounded-xl pl-10 pr-4 py-2 w-64 text-sm outline-none transition-all" 
+                  className="bg-slate-100 hover:bg-slate-50 focus:bg-white border border-transparent focus:border-primary-200 rounded-xl pl-10 pr-12 py-2 w-64 text-sm outline-none transition-all" 
                 />
+                {searchQuery && (
+                  <button 
+                    onClick={handleSaveSearch}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-primary-500 hover:bg-white rounded-lg transition-all"
+                    title="Save Search Alert"
+                  >
+                    <Bell size={14} />
+                  </button>
+                )}
               </div>
               <button 
                 onClick={handleRefresh}
@@ -329,7 +380,19 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
               <Search size={48} className="text-slate-300" />
             </div>
             <h3 className="text-lg font-semibold text-slate-700">No items found</h3>
-            <p className="text-sm mb-6">Try adjusting your search or filters.</p>
+            <p className="text-sm mb-6 max-w-xs text-center">
+               We couldn't find matches in <span className="font-bold text-slate-900">{activeFilters.college === 'All' ? 'any college' : activeFilters.college}</span>.
+            </p>
+            
+            {activeFilters.college !== 'All' && (
+               <button 
+                 onClick={handleExpandToAllColleges}
+                 className="mb-4 px-6 py-3 bg-indigo-50 text-indigo-700 rounded-xl font-bold text-sm hover:bg-indigo-100 transition-colors flex items-center gap-2 shadow-sm"
+               >
+                 <Globe size={16} /> Search All Colleges
+               </button>
+            )}
+
             {activeCount > 0 && (
                <button 
                  onClick={handleClearFilters}
@@ -338,7 +401,8 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
                  Clear all filters
                </button>
             )}
-            {onSellClick && !activeCount && (
+            
+            {onSellClick && !activeCount && activeFilters.college === 'All' && (
               <button 
                 onClick={onSellClick}
                 className="mt-4 flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-full font-bold text-sm hover:bg-slate-800 transition-colors shadow-lg active:scale-95"
@@ -364,6 +428,96 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
               </div>
               
               <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                 
+                 {/* Seller Trust Section */}
+                 <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase">Seller Reliability</h4>
+                    
+                    {/* Verified Only Toggle */}
+                    <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                       <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-full ${filters.verifiedOnly ? 'bg-green-100 text-green-600' : 'bg-slate-200 text-slate-500'}`}>
+                             <ShieldCheck size={18} />
+                          </div>
+                          <div>
+                             <p className="text-sm font-bold text-slate-800">Verified Sellers</p>
+                             <p className="text-[10px] text-slate-500">Only ID-verified students</p>
+                          </div>
+                       </div>
+                       <label className="relative inline-flex items-center cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            className="sr-only peer" 
+                            checked={filters.verifiedOnly}
+                            onChange={(e) => setFilters(prev => ({...prev, verifiedOnly: e.target.checked}))}
+                          />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                       </label>
+                    </div>
+
+                    {/* Rating Selector */}
+                    <div>
+                       <p className="text-xs font-bold text-slate-500 mb-2">Minimum Seller Rating</p>
+                       <div className="flex gap-2">
+                          {[0, 3, 4, 5].map((rating) => (
+                             <button
+                               key={rating}
+                               onClick={() => setFilters(prev => ({...prev, minRating: rating}))}
+                               className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-1 ${
+                                 filters.minRating === rating
+                                   ? 'bg-amber-50 border-amber-200 text-amber-700' 
+                                   : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                               }`}
+                             >
+                                {rating === 0 ? 'Any' : (
+                                   <>{rating}+ <Star size={10} fill="currentColor" /></>
+                                )}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+                 </div>
+
+                 <hr className="border-slate-100" />
+
+                 {/* College Filter */}
+                 <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase">College Scope</h4>
+                    <div className="space-y-2">
+                       {user?.college && (
+                         <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${filters.college === user.college ? 'bg-primary-50 border-primary-200 ring-1 ring-primary-500' : 'bg-white border-slate-200'}`}>
+                            <div className="flex items-center gap-2">
+                               <Building2 size={18} className={filters.college === user.college ? 'text-primary-600' : 'text-slate-400'} />
+                               <span className={`text-sm font-bold ${filters.college === user.college ? 'text-primary-900' : 'text-slate-600'}`}>My College ({user.college})</span>
+                            </div>
+                            <input 
+                              type="radio" 
+                              name="college"
+                              className="hidden"
+                              checked={filters.college === user.college}
+                              onChange={() => setFilters(prev => ({...prev, college: user.college}))}
+                            />
+                            {filters.college === user.college && <Check size={16} className="text-primary-600" />}
+                         </label>
+                       )}
+                       
+                       <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${filters.college === 'All' ? 'bg-slate-100 border-slate-300' : 'bg-white border-slate-200'}`}>
+                          <div className="flex items-center gap-2">
+                             <Globe size={18} className="text-slate-400" />
+                             <span className="text-sm font-bold text-slate-600">All Colleges</span>
+                          </div>
+                          <input 
+                            type="radio" 
+                            name="college"
+                            className="hidden"
+                            checked={filters.college === 'All'}
+                            onChange={() => setFilters(prev => ({...prev, college: 'All'}))}
+                          />
+                          {filters.college === 'All' && <Check size={16} className="text-slate-600" />}
+                       </label>
+                    </div>
+                 </div>
+
                  {/* Sort */}
                  <div className="space-y-3">
                     <h4 className="text-xs font-bold text-slate-400 uppercase">Sort By</h4>
@@ -423,13 +577,13 @@ export const Marketplace: React.FC<MarketplaceProps> = ({ type, onBack, onItemCl
                    onClick={handleClearFilters}
                    className="flex-1 py-3 text-slate-500 font-bold hover:text-slate-800 transition-colors"
                  >
-                   Clear All
+                   Reset
                  </button>
                  <button 
                    onClick={handleApplyFilters}
                    className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all active:scale-95"
                  >
-                   Show Results
+                   Apply Filters
                  </button>
               </div>
            </div>

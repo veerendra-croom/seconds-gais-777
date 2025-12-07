@@ -269,6 +269,7 @@ const AppContent: React.FC = () => {
       case 'REQUEST':
         return <Marketplace 
           type={currentView} 
+          user={userProfile} 
           onBack={() => setCurrentView('HOME')} 
           onItemClick={handleItemClick} 
           initialSearchQuery={globalSearchQuery} 

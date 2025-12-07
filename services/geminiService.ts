@@ -103,6 +103,104 @@ export const analyzeImageForSearch = async (file: File): Promise<string> => {
 }
 
 /**
+ * Visual Listing: Analyzes an image to auto-fill listing details.
+ */
+export const analyzeImageForListing = async (file: File): Promise<any> => {
+  try {
+    if (!process.env.API_KEY) return null;
+
+    // Convert file to base64
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+    });
+    const base64String = base64Data.split(',')[1];
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: file.type, data: base64String } },
+          { 
+            text: `
+              Analyze this image for a student marketplace listing. 
+              Identify the item and provide details.
+              
+              Return a JSON object with the following fields:
+              - title: A short, catchy title (string)
+              - category: One of [Electronics, Books, Furniture, Clothing, Services, Vehicles, Other] (string)
+              - price: Estimated used market price in USD (number)
+              - description: A persuasive 2-3 sentence description suitable for selling to students (string)
+              - condition: One of [Like New, Good, Fair, Poor] (string)
+
+              Return ONLY the raw JSON object. Do not wrap in markdown code blocks.
+            ` 
+          }
+        ]
+      }
+    });
+
+    const text = response.text?.trim() || "";
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanText);
+  } catch (e) {
+    console.error("Auto-fill listing error", e);
+    return null;
+  }
+}
+
+/**
+ * Audio Listing: Analyzes voice input to auto-fill listing details.
+ */
+export const analyzeAudioForListing = async (audioBlob: Blob): Promise<any> => {
+  try {
+    if (!process.env.API_KEY) return null;
+
+    const reader = new FileReader();
+    const base64Promise = new Promise<string>((resolve) => {
+      reader.onloadend = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        resolve(base64);
+      };
+    });
+    reader.readAsDataURL(audioBlob);
+    const base64String = await base64Promise;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: audioBlob.type || 'audio/webm', data: base64String } },
+          {
+            text: `
+              Listen to this student describing an item they want to sell or a service they offer.
+              Extract the details into a JSON object:
+              - title: Short item title (string)
+              - category: One of [Electronics, Books, Furniture, Clothing, Services, Vehicles, Other] (string)
+              - price: Numeric price in USD (number) (If not mentioned, estimate based on item type and used condition)
+              - description: A persuasive sales description based on their speech (string)
+              - condition: One of [Like New, Good, Fair, Poor] (string)
+              - type: One of [SALE, RENT, SERVICE, REQUEST] (string) (Default to SALE if ambiguous)
+
+              Return ONLY the raw JSON object. Do not wrap in markdown code blocks.
+            `
+          }
+        ]
+      }
+    });
+
+    const text = response.text?.trim() || "";
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanText);
+  } catch (e) {
+    console.error("Voice-to-listing error", e);
+    return null;
+  }
+}
+
+/**
  * Generates context-aware smart replies for chat.
  */
 export const generateSmartReplies = async (
@@ -169,5 +267,45 @@ export const analyzePrice = async (title: string, price: number): Promise<{ verd
     return { verdict: 'Fair Price', estimatedRange: 'Unknown', reason: 'Could not analyze market data.' };
   } catch (e) {
     return { verdict: 'Unknown', estimatedRange: '$-', reason: 'Analysis failed.' };
+  }
+};
+
+/**
+ * Identifies safe meeting spots on a specific college campus.
+ */
+export const getSafeMeetingSpots = async (collegeName: string): Promise<{ id: number, name: string, type: string }[]> => {
+  try {
+    if (!process.env.API_KEY) {
+      return [
+        { id: 1, name: "Student Union (Lobby)", type: "Public" },
+        { id: 2, name: "Main Library (Front Desk)", type: "Quiet" },
+        { id: 3, name: "Campus Police Station", type: "Safe Zone" }
+      ];
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `
+        Identify 3-4 specific, well-known, safe, and public meeting spots on the campus of "${collegeName}".
+        Focus on places like: Student Unions, Main Libraries, Campus Centers, or designated Safe Trade Zones.
+        
+        Return ONLY a raw JSON array with no markdown formatting.
+        Example: [{"name": "Main Library Lobby", "type": "Public"}, {"name": "Student Center Info Desk", "type": "High Traffic"}]
+      `
+    });
+
+    const text = response.text?.trim() || "";
+    // Clean up markdown if present
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    
+    const spots = JSON.parse(cleanText);
+    return spots.map((s: any, i: number) => ({ id: i + 1, name: s.name, type: s.type }));
+  } catch (e) {
+    console.error("Failed to get safe spots", e);
+    return [
+        { id: 1, name: "Student Union (Lobby)", type: "Public" },
+        { id: 2, name: "Main Library (Front Desk)", type: "Quiet" },
+        { id: 3, name: "Campus Police Station", type: "Safe Zone" }
+    ];
   }
 };

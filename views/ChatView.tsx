@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Conversation, Message, UserProfile, Item } from '../types';
 import { api } from '../services/api';
-import { generateSmartReplies } from '../services/geminiService';
+import { generateSmartReplies, getSafeMeetingSpots } from '../services/geminiService';
 import { ChevronLeft, Send, Image as ImageIcon, MoreVertical, ShieldCheck, MapPin, Phone, Ban, Loader2, Sparkles, X, Building2, CheckCircle2, XCircle, Calendar } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
@@ -13,14 +13,6 @@ interface ChatViewProps {
   onViewItem?: (itemId: string) => void;
 }
 
-// Mock Safe Zones (In prod this would come from API based on College)
-const SAFE_ZONES = [
-  { id: 1, name: "Student Union (Lobby)", type: "Public" },
-  { id: 2, name: "Main Library (Front Desk)", type: "Quiet" },
-  { id: 3, name: "Campus Police Station", type: "Safe Zone" },
-  { id: 4, name: "Coffee Shop (North)", type: "Public" },
-];
-
 export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversation, targetItem, onBack, onViewItem }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -30,6 +22,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
   const [uploading, setUploading] = useState(false);
   const [smartReplies, setSmartReplies] = useState<string[]>(["Hi, is this available?", "I'm interested!", "Can we meet nearby?"]);
   const [loadingReplies, setLoadingReplies] = useState(false);
+  
+  // Safe Zone State
+  const [safeZones, setSafeZones] = useState<{id: number, name: string, type: string}[]>([]);
+  const [loadingSafeZones, setLoadingSafeZones] = useState(false);
   
   // Image Preview State
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -68,6 +64,12 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
     }
   }, [partnerId]);
 
+  useEffect(() => {
+    if (showMeetupModal && safeZones.length === 0) {
+       loadSafeZones();
+    }
+  }, [showMeetupModal]);
+
   const loadMessages = async () => {
     try {
       const msgs = await api.getMessages(currentUser.id, partnerId, contextItemId);
@@ -78,6 +80,18 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSafeZones = async () => {
+    setLoadingSafeZones(true);
+    try {
+      const spots = await getSafeMeetingSpots(currentUser.college);
+      setSafeZones(spots);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingSafeZones(false);
     }
   };
 
@@ -457,20 +471,37 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
                  <X size={18} className="text-slate-400" />
               </button>
            </div>
-           <div className="p-2 space-y-1">
-              {SAFE_ZONES.map(zone => (
-                 <button 
-                   key={zone.id}
-                   onClick={() => handleSuggestMeetup(zone.name)}
-                   className="w-full text-left p-3 hover:bg-slate-50 rounded-xl transition-colors flex items-center justify-between group"
-                 >
-                    <div>
-                       <p className="font-bold text-slate-700 text-sm group-hover:text-primary-600">{zone.name}</p>
-                       <p className="text-[10px] text-slate-400 font-medium">{zone.type}</p>
-                    </div>
-                    <ChevronLeft size={16} className="rotate-180 text-slate-300 group-hover:text-primary-500" />
-                 </button>
-              ))}
+           
+           <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
+              {loadingSafeZones ? (
+                 <div className="p-6 text-center text-slate-400 flex flex-col items-center">
+                    <Loader2 size={24} className="animate-spin mb-2 text-primary-500" />
+                    <span className="text-xs">AI finding safe zones at {currentUser.college}...</span>
+                 </div>
+              ) : safeZones.length > 0 ? (
+                 <>
+                   <p className="px-4 py-2 text-[10px] font-bold text-primary-600 uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles size={10} /> AI Recommendations
+                   </p>
+                   {safeZones.map(zone => (
+                     <button 
+                       key={zone.id}
+                       onClick={() => handleSuggestMeetup(zone.name)}
+                       className="w-full text-left p-3 hover:bg-slate-50 rounded-xl transition-colors flex items-center justify-between group"
+                     >
+                        <div>
+                           <p className="font-bold text-slate-700 text-sm group-hover:text-primary-600">{zone.name}</p>
+                           <p className="text-[10px] text-slate-400 font-medium">{zone.type}</p>
+                        </div>
+                        <ChevronLeft size={16} className="rotate-180 text-slate-300 group-hover:text-primary-500" />
+                     </button>
+                   ))}
+                 </>
+              ) : (
+                 <div className="p-4 text-center text-slate-400 text-sm">
+                    No locations found.
+                 </div>
+              )}
            </div>
         </div>
       )}

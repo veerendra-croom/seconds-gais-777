@@ -1,6 +1,7 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { ModuleType, Item, UserProfile, Notification } from '../types';
-import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff } from 'lucide-react';
+import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
 import { analyzeImageForSearch } from '../services/geminiService';
@@ -37,6 +38,7 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [enabledModules, setEnabledModules] = useState(allModules);
   const [appBanner, setAppBanner] = useState('');
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
@@ -85,8 +87,16 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     const stored = localStorage.getItem('recent_searches');
     if (stored) setRecentSearches(JSON.parse(stored));
 
+    // PWA Install Prompt Listener
+    const handleInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleInstallPrompt);
+
     return () => {
       subscription.unsubscribe();
+      window.removeEventListener('beforeinstallprompt', handleInstallPrompt);
     };
   }, [user.id]);
 
@@ -96,6 +106,17 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
       setNotifications(notes);
     } catch (e) { console.error(e); }
   }
+
+  const handleInstallClick = () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    installPrompt.userChoice.then((choiceResult: any) => {
+      if (choiceResult.outcome === 'accepted') {
+        console.log('User accepted the install prompt');
+      }
+      setInstallPrompt(null);
+    });
+  };
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -325,6 +346,27 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
           <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-white/10 rounded-full blur-3xl group-hover:scale-125 transition-transform duration-700"></div>
         </div>
       </div>
+
+      {/* Install App Banner */}
+      {installPrompt && (
+        <div className="px-6 mt-6 animate-slide-up">
+           <div className="bg-slate-900 rounded-2xl p-4 flex items-center justify-between shadow-xl shadow-slate-900/10">
+              <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-900 font-black">S</div>
+                 <div className="text-white">
+                    <p className="font-bold text-sm">Install Seconds</p>
+                    <p className="text-xs text-slate-400">Better experience, instant access</p>
+                 </div>
+              </div>
+              <button 
+                onClick={handleInstallClick}
+                className="bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+              >
+                <Download size={14} /> Install
+              </button>
+           </div>
+        </div>
+      )}
 
       {/* Modules Grid */}
       <div className="px-6 mt-10">

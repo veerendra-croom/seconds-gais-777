@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, CreditCard, Lock, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 interface PurchaseModalProps {
@@ -13,8 +13,55 @@ interface PurchaseModalProps {
 export const PurchaseModal: React.FC<PurchaseModalProps> = ({ isOpen, onClose, itemTitle, price, onConfirm }) => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   if (!isOpen) return null;
+
+  const fireConfetti = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles: any[] = [];
+    const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
+
+    for (let i = 0; i < 150; i++) {
+      particles.push({
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        vx: (Math.random() - 0.5) * 15,
+        vy: (Math.random() - 0.5) * 15,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: Math.random() * 8 + 4,
+        life: 100
+      });
+    }
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let active = false;
+
+      particles.forEach(p => {
+        if (p.life > 0) {
+          active = true;
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.5; // Gravity
+          p.life--;
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x, p.y, p.size, p.size);
+        }
+      });
+
+      if (active) requestAnimationFrame(animate);
+    };
+
+    animate();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,10 +71,11 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ isOpen, onClose, i
       try {
         await onConfirm();
         setSuccess(true);
+        setTimeout(() => fireConfetti(), 100);
         setTimeout(() => {
           setSuccess(false);
           onClose();
-        }, 3000);
+        }, 3500);
       } catch (e) {
         console.error(e);
         setLoading(false);
@@ -37,15 +85,16 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ isOpen, onClose, i
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl">
+      {success && <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-[60]" />}
+      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative z-50">
         {success ? (
-          <div className="p-10 text-center flex flex-col items-center">
-            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
-              <CheckCircle2 size={32} />
+          <div className="p-10 text-center flex flex-col items-center animate-in zoom-in duration-300">
+            <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-6 animate-bounce">
+              <CheckCircle2 size={40} />
             </div>
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">Payment Successful!</h2>
-            <p className="text-slate-500 text-sm mb-4">Your payment is held securely in Escrow until you confirm receipt of the item.</p>
-            <div className="bg-slate-50 p-3 rounded-xl text-xs text-slate-500 font-mono">
+            <h2 className="text-2xl font-black text-slate-800 mb-2">Payment Successful!</h2>
+            <p className="text-slate-500 text-sm mb-6">Your payment is held securely in Escrow until you confirm receipt of the item.</p>
+            <div className="bg-slate-50 p-3 rounded-xl text-xs text-slate-500 font-mono border border-slate-100">
                Transaction ID: #{Math.random().toString(36).substr(2, 9).toUpperCase()}
             </div>
           </div>

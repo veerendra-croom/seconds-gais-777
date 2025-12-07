@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, Camera, Sparkles, Loader2, X, AlertCircle, Upload, Save, Trash2, Image as ImageIcon, Plus, ArrowLeft, ArrowRight, RefreshCw, GripHorizontal } from 'lucide-react';
-import { generateItemDescription, suggestPrice } from '../services/geminiService';
+import { ChevronLeft, Camera, Sparkles, Loader2, X, AlertCircle, Upload, Save, Trash2, Image as ImageIcon, Plus, ArrowLeft, ArrowRight, RefreshCw, GripHorizontal, Wand2, Mic, MicOff } from 'lucide-react';
+import { generateItemDescription, suggestPrice, analyzeImageForListing, analyzeAudioForListing } from '../services/geminiService';
 import { Category, UserProfile, Item } from '../types';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
@@ -26,6 +26,9 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
   const [publishLoading, setPublishLoading] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [processingAudio, setProcessingAudio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<string>('');
   const { showToast } = useToast();
@@ -33,6 +36,8 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
   // Media State
   const [images, setImages] = useState<ImageUpload[]>([]);
   const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -124,6 +129,109 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       showToast("Failed to generate content.", 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAutoFillFromPhoto = async () => {
+    // Get the first uploaded file (not just URL)
+    const firstImageUpload = images.find(i => i.file);
+    
+    if (!firstImageUpload || !firstImageUpload.file) {
+      showToast("Please upload a photo first.", 'error');
+      return;
+    }
+
+    setAnalyzingPhoto(true);
+    showToast("Analyzing photo...", 'info');
+
+    try {
+      const data = await analyzeImageForListing(firstImageUpload.file);
+      
+      if (data) {
+        setFormData(prev => ({
+          ...prev,
+          title: data.title || prev.title,
+          category: data.category || prev.category,
+          price: data.price ? data.price.toString() : prev.price,
+          description: data.description || prev.description,
+          condition: data.condition || prev.condition
+        }));
+        showToast("Auto-fill complete!", 'success');
+      } else {
+        showToast("Could not identify item details.", 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Analysis failed.", 'error');
+    } finally {
+      setAnalyzingPhoto(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current.onstop = handleRecordingStop;
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      showToast("Listening... describe your item", 'info');
+    } catch (err) {
+      console.error("Microphone access denied", err);
+      showToast("Microphone access denied", 'error');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      // Stop all tracks
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+  };
+
+  const handleRecordingStop = async () => {
+    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+    setProcessingAudio(true);
+    showToast("Processing audio...", 'info');
+
+    try {
+      const data = await analyzeAudioForListing(audioBlob);
+      if (data) {
+        setFormData(prev => ({
+          ...prev,
+          title: data.title || prev.title,
+          category: data.category || prev.category,
+          price: data.price ? data.price.toString() : prev.price,
+          description: data.description || prev.description,
+          condition: data.condition || prev.condition,
+          type: data.type || prev.type
+        }));
+        showToast("Details extracted from voice!", 'success');
+      } else {
+        showToast("Could not understand audio.", 'error');
+      }
+    } catch (e) {
+      showToast("Voice analysis failed.", 'error');
+    } finally {
+      setProcessingAudio(false);
+    }
+  };
+
+  const handleVoiceButtonClick = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
     }
   };
 
@@ -512,19 +620,48 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                <Sparkles size={64} />
             </div>
             
-            <div className="flex justify-between items-center mb-4 relative z-10">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 relative z-10 gap-3">
               <h3 className="text-indigo-900 font-bold text-sm md:text-base flex items-center">
                 <Sparkles size={18} className="mr-2 text-indigo-500" /> 
                 AI Smart Assistant
               </h3>
-              <button 
-                onClick={handleSmartGenerate}
-                disabled={loading}
-                className="text-xs font-semibold bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-70 flex items-center shadow-lg shadow-indigo-200 transition-all active:scale-95"
-              >
-                {loading ? <Loader2 size={14} className="animate-spin mr-2"/> : <Sparkles size={14} className="mr-2" />}
-                {loading ? 'Thinking...' : 'Auto-Fill'}
-              </button>
+              
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                {/* Voice-to-Listing Button */}
+                <button 
+                  onClick={handleVoiceButtonClick}
+                  disabled={processingAudio}
+                  className={`flex-1 sm:flex-none text-xs font-semibold px-3 py-2 rounded-lg transition-all active:scale-95 whitespace-nowrap flex items-center justify-center shadow-md ${
+                    isRecording 
+                      ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse' 
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {processingAudio ? <Loader2 size={14} className="animate-spin mr-2"/> : isRecording ? <MicOff size={14} className="mr-2" /> : <Mic size={14} className="mr-2" />}
+                  {processingAudio ? 'Processing...' : isRecording ? 'Stop Recording' : 'Speak to List'}
+                </button>
+
+                {/* Auto-Fill from Photo Button - Only shows when images exist */}
+                {images.some(i => i.file) && (
+                  <button 
+                    onClick={handleAutoFillFromPhoto}
+                    disabled={analyzingPhoto || loading}
+                    className="flex-1 sm:flex-none text-xs font-semibold bg-violet-600 text-white px-3 py-2 rounded-lg hover:bg-violet-700 disabled:opacity-70 flex items-center justify-center shadow-lg shadow-violet-200 transition-all active:scale-95 whitespace-nowrap"
+                  >
+                    {analyzingPhoto ? <Loader2 size={14} className="animate-spin mr-2"/> : <Camera size={14} className="mr-2" />}
+                    {analyzingPhoto ? 'Analyzing...' : 'Auto-Fill from Photo'}
+                  </button>
+                )}
+
+                <button 
+                  onClick={handleSmartGenerate}
+                  disabled={loading || analyzingPhoto}
+                  className="flex-1 sm:flex-none text-xs font-semibold bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-70 flex items-center justify-center shadow-lg shadow-indigo-200 transition-all active:scale-95 whitespace-nowrap"
+                >
+                  {loading ? <Loader2 size={14} className="animate-spin mr-2"/> : <Wand2 size={14} className="mr-2" />}
+                  {loading ? 'Thinking...' : 'Auto-Describe'}
+                </button>
+              </div>
             </div>
             
             <textarea 

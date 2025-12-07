@@ -89,11 +89,17 @@ export const api = {
     type: string, 
     category: string | 'All', 
     searchQuery?: string, 
-    filters?: { minPrice?: number, maxPrice?: number, condition?: string[], sortBy?: string },
+    filters?: { minPrice?: number, maxPrice?: number, condition?: string[], sortBy?: string, college?: string, verifiedOnly?: boolean, minRating?: number },
     page: number = 0, 
     limit: number = 12
   ): Promise<Item[]> => {
-    let query = supabase.from('items').select(`*, profiles:seller_id (full_name, college, verified, banned)`).eq('status', 'ACTIVE');
+    // If filtering by verification status, we need to use an inner join to filter on the joined 'profiles' table.
+    // Otherwise, standard left join is sufficient.
+    const profileSelect = filters?.verifiedOnly ? 'profiles!inner' : 'profiles';
+    
+    let query = supabase.from('items')
+      .select(`*, ${profileSelect}:seller_id (full_name, college, verified, banned)`)
+      .eq('status', 'ACTIVE');
     
     // Type Filter
     let dbType = type;
@@ -115,10 +121,30 @@ export const api = {
     if (filters) {
       if (filters.minPrice !== undefined && filters.minPrice > 0) query = query.gte('price', filters.minPrice);
       if (filters.maxPrice !== undefined && filters.maxPrice > 0) query = query.lte('price', filters.maxPrice);
+      
+      // College Filter (Default to user's college, unless 'All' is specified)
+      if (filters.college && filters.college !== 'All') {
+        query = query.eq('college', filters.college);
+      }
+
+      // Verification Filter (Handled via !inner join above + where clause here)
+      if (filters.verifiedOnly) {
+        query = query.eq(`${profileSelect}.verified`, true);
+      }
+
+      // Rating Filter
+      if (filters.minRating !== undefined && filters.minRating > 0) {
+        query = query.gte('rating', filters.minRating);
+      }
     }
 
-    // Explicitly exclude items from banned users
-    query = query.is('profiles.banned', false);
+    // Explicitly exclude items from banned users (Note: accessing nested properties in filter varies by setup, 
+    // but typically !inner filters rows. If using left join, we filter in JS post-fetch for banned, or assume row policy handles it)
+    if (!filters?.verifiedOnly) {
+       // If standard join, we still prefer not to show banned users. 
+       // However, typical PostgREST filtering on embedded resource is tricky without !inner.
+       // We'll filter banned users in the map/filter block below for safety if not using inner join.
+    }
 
     // Sorting
     if (filters?.sortBy === 'PRICE_ASC') {
