@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut, PanelLeftClose, PanelLeftOpen, LayoutDashboard } from 'lucide-react';
 import { ModuleType } from '../types';
 
 interface NavigationProps {
@@ -7,9 +8,10 @@ interface NavigationProps {
   setView: (view: ModuleType) => void;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (isOpen: boolean) => void;
+  userRole?: string;
 }
 
-export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, isSidebarOpen, setIsSidebarOpen }) => {
+export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, isSidebarOpen, setIsSidebarOpen, userRole }) => {
   const navItems = [
     { id: 'HOME', icon: Home, label: 'Home' },
     { id: 'BUY', icon: ShoppingBag, label: 'Shop', activeMatch: ['BUY', 'RENT', 'SHARE', 'SWAP', 'EARN', 'ITEM_DETAIL'] },
@@ -17,6 +19,10 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, is
     { id: 'CHAT_LIST', icon: MessageCircle, label: 'Chat', activeMatch: ['CHAT_LIST', 'CHAT_ROOM'] }, 
     { id: 'PROFILE', icon: User, label: 'Profile' },
   ];
+
+  if (userRole === 'ADMIN') {
+    navItems.push({ id: 'ADMIN_DASHBOARD', icon: LayoutDashboard, label: 'Admin Panel' });
+  }
 
   return (
     <>

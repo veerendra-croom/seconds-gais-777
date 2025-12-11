@@ -44,7 +44,7 @@ export const generateItemDescription = async (
 };
 
 /**
- * Suggests a price based on item details (Mock implementation of Valuation AI).
+ * Suggests a price based on real-time market data using Search Grounding.
  */
 export const suggestPrice = async (itemTitle: string): Promise<string> => {
    try {
@@ -52,12 +52,85 @@ export const suggestPrice = async (itemTitle: string): Promise<string> => {
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Give me a single number representing the estimated used market price in USD for a used "${itemTitle}" in good condition for a college student. return only the number.`,
+      contents: `Find the current used market price for "${itemTitle}" in USD. Return ONLY a single number representing a fair selling price for a quick student-to-student sale (e.g. 45). Do not output text.`,
+      config: {
+        tools: [{ googleSearch: {} }], // Use Search Grounding for accuracy
+      }
     });
-    return response.text?.trim() || "N/A";
+    
+    // Extract number from potentially chatty response
+    const text = response.text || "";
+    const match = text.match(/\d+/);
+    return match ? match[0] : "N/A";
    } catch (e) {
      return "N/A";
    }
+}
+
+/**
+ * Parses natural language search queries into structured filters.
+ * e.g. "cheap macbook under 500" -> { searchQuery: "macbook", maxPrice: 500, sortBy: "PRICE_ASC" }
+ */
+export const parseSearchQuery = async (query: string): Promise<any> => {
+  try {
+    if (!process.env.API_KEY) return null;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `
+        Parse this search query: "${query}" into structured filters for a marketplace API.
+        
+        Return JSON object with optional fields:
+        - searchQuery: The main keyword (string)
+        - minPrice: number
+        - maxPrice: number
+        - category: One of [Electronics, Books, Furniture, Clothing, Services, Vehicles, Other] (string)
+        - sortBy: One of [PRICE_ASC, PRICE_DESC, NEWEST] (string)
+        
+        Example: "cheap bike under 100" -> {"searchQuery": "bike", "maxPrice": 100, "sortBy": "PRICE_ASC", "category": "Vehicles"}
+        Example: "math tutor" -> {"searchQuery": "math tutor", "category": "Services"}
+        
+        Return ONLY the raw JSON.
+      `
+    });
+
+    const text = response.text?.trim() || "{}";
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanText);
+  } catch (e) {
+    console.error("Smart Search Error", e);
+    return null;
+  }
+}
+
+/**
+ * Checks image safety before upload.
+ */
+export const checkImageSafety = async (file: File): Promise<boolean> => {
+  try {
+    if (!process.env.API_KEY) return true; // Fail open for demo
+
+    const base64Data = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: file.type, data: base64Data } },
+          { text: "Is this image appropriate for a general public marketplace? Return YES or NO." }
+        ]
+      }
+    });
+
+    const text = response.text?.trim().toUpperCase() || "YES";
+    return !text.includes("NO");
+  } catch (e) {
+    return true; 
+  }
 }
 
 /**
@@ -67,30 +140,20 @@ export const analyzeImageForSearch = async (file: File): Promise<string> => {
   try {
     if (!process.env.API_KEY) return "";
 
-    // Convert file to base64
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = reject;
     });
-
-    // Remove the data URL prefix (e.g. "data:image/jpeg;base64,")
     const base64String = base64Data.split(',')[1];
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // Using flash for speed/vision capabilities
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
-          {
-            inlineData: {
-              mimeType: file.type,
-              data: base64String
-            }
-          },
-          {
-            text: "Identify the main item in this picture. Return ONLY the product name or category that I should search for in a marketplace (e.g. 'Graphing Calculator' or 'Calculus Textbook'). Keep it under 4 words."
-          }
+          { inlineData: { mimeType: file.type, data: base64String } },
+          { text: "Identify the main item in this picture. Return ONLY the product name or category (e.g. 'Graphing Calculator'). Keep it under 4 words." }
         ]
       }
     });
@@ -109,7 +172,6 @@ export const analyzeImageForListing = async (file: File): Promise<any> => {
   try {
     if (!process.env.API_KEY) return null;
 
-    // Convert file to base64
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -239,7 +301,7 @@ export const generateSmartReplies = async (
 };
 
 /**
- * Analyzes market price for an item description.
+ * Analyzes market price for an item description using Search Grounding.
  */
 export const analyzePrice = async (title: string, price: number): Promise<{ verdict: string, estimatedRange: string, reason: string }> => {
   try {
@@ -249,13 +311,17 @@ export const analyzePrice = async (title: string, price: number): Promise<{ verd
       model: 'gemini-2.5-flash',
       contents: `
         Analyze the price of this used item: "${title}" listed for $${price}.
-        Estimate the typical used market price range.
+        Use Google Search to find current used prices on eBay, Mercari, or Amazon.
+        
         Determine if it is a "Great Deal", "Fair Price", or "Overpriced".
-        Provide a 1 sentence reason.
+        Provide a 1 sentence reason citing the typical market range found.
         
         Return JSON format:
-        { "verdict": "Great Deal", "estimatedRange": "$10 - $15", "reason": "Typically sells for $20 used." }
-      `
+        { "verdict": "Great Deal", "estimatedRange": "$10 - $15", "reason": "Cheaper than average eBay listing." }
+      `,
+      config: {
+        tools: [{ googleSearch: {} }], // ENABLE GROUNDING
+      }
     });
 
     // Simple JSON extraction
@@ -307,5 +373,58 @@ export const getSafeMeetingSpots = async (collegeName: string): Promise<{ id: nu
         { id: 2, name: "Main Library (Front Desk)", type: "Quiet" },
         { id: 3, name: "Campus Police Station", type: "Safe Zone" }
     ];
+  }
+};
+
+/**
+ * Calculates sustainability impact of a used item.
+ */
+export const analyzeSustainability = async (itemTitle: string, category: string): Promise<{ co2Saved: string, waterSaved: string, fact: string }> => {
+  try {
+    if (!process.env.API_KEY) return { co2Saved: '5kg', waterSaved: '100L', fact: 'Reuse reduces waste.' };
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `
+        Estimate the environmental savings of buying a used "${itemTitle}" (${category}) instead of new.
+        Return a JSON object with:
+        - co2Saved: string (e.g. "12kg")
+        - waterSaved: string (e.g. "500L")
+        - fact: string (Short, 1-sentence fun fact about recycling this type of item)
+        
+        Return ONLY raw JSON.
+      `
+    });
+
+    const text = response.text?.trim() || "{}";
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanText);
+  } catch (e) {
+    return { co2Saved: '5kg', waterSaved: '100L', fact: 'Buying used extends product life cycles.' };
+  }
+};
+
+/**
+ * Generates personalized selling tips for a user's inventory.
+ */
+export const generateSellerTips = async (itemTitles: string[]): Promise<string[]> => {
+  try {
+    if (!process.env.API_KEY || itemTitles.length === 0) return ["Add more photos to attract buyers.", "Share your listing on social media.", "Lower the price slightly to sell faster."];
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `
+        I am selling these items on a college marketplace: ${itemTitles.join(', ')}.
+        Give me 3 specific, short, actionable tips to sell these faster.
+        Return ONLY a JSON array of strings.
+        Example: ["Mention the textbook edition in the title", "Take a photo of the bike frame close-up"]
+      `
+    });
+
+    const text = response.text?.trim() || "[]";
+    const cleanText = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanText);
+  } catch (e) {
+    return ["Add more photos to attract buyers.", "Share your listing on social media.", "Lower the price slightly to sell faster."];
   }
 };

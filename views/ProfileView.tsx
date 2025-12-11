@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
-import { UserProfile, Item, Review, Badge } from '../types';
+import { UserProfile, Item, Review, Badge, Transaction, Booking } from '../types';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Settings, LogOut, Award, ChevronRight, User, Edit2, Trash2, Eye, CheckCircle2, ShoppingBag, Clock, Repeat, Star, HelpCircle, Heart, MapPin, Inbox, XCircle, Calendar, MessageCircle, Twitter, Instagram, Linkedin, Globe, QrCode, ArrowRight, PlusCircle, ChevronLeft, Flag } from 'lucide-react';
+import { Settings, LogOut, Award, ChevronRight, User, Edit2, Trash2, Eye, CheckCircle2, ShoppingBag, Clock, Repeat, Star, HelpCircle, Heart, MapPin, Inbox, XCircle, Calendar, MessageCircle, Twitter, Instagram, Linkedin, Globe, QrCode, ArrowRight, PlusCircle, ChevronLeft, Flag, LayoutDashboard, ArrowDown } from 'lucide-react';
 import { signOut } from '../services/supabaseClient';
 import { api } from '../services/api';
 import { EditProfileModal } from '../components/EditProfileModal';
@@ -14,6 +15,7 @@ import { BadgesModal } from '../components/BadgesModal';
 import { ReviewModal } from '../components/ReviewModal';
 import { ReportModal } from '../components/ReportModal';
 import { useToast } from '../components/Toast';
+import { ItemCard } from '../components/ItemCard';
 
 interface ProfileViewProps {
   user: UserProfile;
@@ -22,9 +24,11 @@ interface ProfileViewProps {
   onStartChat?: (user: UserProfile) => void;
   initialTab?: 'SELLING' | 'BUYING' | 'OFFERS' | 'SAVED' | 'REVIEWS';
   onBack?: () => void;
+  onViewOrder?: (order: any, type: 'PURCHASE' | 'SALE' | 'BOOKING' | 'OFFER') => void;
+  onGoToDashboard?: () => void;
 }
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onEditItem, isPublic = false, onStartChat, initialTab, onBack }) => {
+export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onEditItem, isPublic = false, onStartChat, initialTab, onBack, onViewOrder, onGoToDashboard }) => {
   const [user, setUser] = useState(initialUser); 
   const [viewMode, setViewMode] = useState<'SELLING' | 'BUYING' | 'OFFERS' | 'SAVED' | 'REVIEWS'>(initialTab || 'SELLING');
   const [showEditProfile, setShowEditProfile] = useState(false);
@@ -36,7 +40,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
   const [showReport, setShowReport] = useState(false);
   const { showToast } = useToast();
   
-  // Review Modal State for Confirm Receipt
+  // Review Modal State
   const [reviewTarget, setReviewTarget] = useState<{id: string, name: string} | null>(null);
 
   // State
@@ -59,7 +63,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
   useEffect(() => {
     if (viewMode === 'SELLING') { 
         fetchUserItems(); 
-        if (!isPublic) fetchEarningsHistory();
+        if (!isPublic) {
+           fetchEarningsHistory();
+           fetchUserOrders(); // Fetch orders to show "My Sales"
+        }
     }
     else if (viewMode === 'BUYING' && !isPublic) fetchUserOrders();
     else if (viewMode === 'OFFERS' && !isPublic) { fetchIncomingOffers(); fetchProviderBookings(); }
@@ -180,36 +187,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
     }
   };
 
-  const handleRespondOffer = async (id: string, status: 'ACCEPTED' | 'REJECTED') => {
-    try {
-      await api.respondToProposal(id, status);
-      setOffers(prev => prev.filter(o => o.id !== id));
-      showToast(`Offer ${status.toLowerCase()}`, status === 'ACCEPTED' ? 'success' : 'info');
-    } catch (e) {
-      showToast("Failed to update offer", 'error');
-    }
-  };
-
-  const handleRespondBooking = async (id: string, status: 'ACCEPTED' | 'REJECTED') => {
-    try {
-      await api.updateBookingStatus(id, status);
-      setIncomingBookings(prev => prev.filter(b => b.id !== id));
-      showToast(`Booking ${status.toLowerCase()}`, status === 'ACCEPTED' ? 'success' : 'info');
-    } catch (e) {
-      showToast("Failed to update booking", 'error');
-    }
-  };
-
-  const handleConfirmReceipt = async (txn: any) => {
-    if (!window.confirm("Confirm you have received this item? This will release funds to the seller.")) return;
-    try {
-      await api.confirmOrder(txn.id, user.id);
-      fetchUserOrders(); // Refresh list
-      showToast("Order completed! Funds released.", 'success');
-      // Prompt review
-      setReviewTarget({ id: txn.seller_id, name: "Seller" }); 
-    } catch (e) {
-      showToast("Failed to confirm order.", 'error');
+  const handleRemoveSaved = async (e: React.MouseEvent, itemId: string) => {
+    e.stopPropagation();
+    if(confirm("Remove from wishlist?")) {
+       await api.toggleSavedItem(user.id, itemId);
+       setSavedItems(prev => prev.filter(i => i.id !== itemId));
+       showToast("Removed from wishlist", 'info');
     }
   };
 
@@ -217,6 +200,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
     if (activeTab === 'ACTIVE') return item.status === 'ACTIVE' || !item.status;
     return item.status === activeTab;
   });
+
+  // Filter Orders
+  const mySales = orders.purchases.filter(p => p.seller_id === user.id);
+  const myPurchases = orders.purchases.filter(p => p.buyer_id === user.id);
 
   // Available tabs based on mode
   const tabs = isPublic 
@@ -327,7 +314,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                 )}
              </div>
 
-             {/* Quick Stats (Only for owner or simplified for public) */}
+             {/* Quick Stats */}
              <div className="flex gap-3 w-full md:w-auto">
                 {!isPublic && (
                   <div 
@@ -381,6 +368,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                       <h3 className="font-bold text-slate-800 flex items-center gap-2">
                          <Clock size={18} className="text-primary-500" /> Recent Earnings
                       </h3>
+                      {onGoToDashboard && (
+                        <button 
+                          onClick={onGoToDashboard}
+                          className="text-xs font-bold text-primary-600 bg-primary-50 px-3 py-1.5 rounded-lg hover:bg-primary-100 transition-colors flex items-center gap-1"
+                        >
+                           <LayoutDashboard size={14} /> Dashboard
+                        </button>
+                      )}
                     </div>
                     <div className="h-64 w-full min-w-0">
                       {earningsData.length > 0 ? (
@@ -404,6 +399,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                            <p className="text-xs">No sales yet.</p>
                         </div>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Sales / Orders */}
+                {!isPublic && mySales.length > 0 && (
+                  <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
+                    <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                       <Inbox size={18} className="text-green-500" /> Active Orders
+                    </h3>
+                    <div className="space-y-3">
+                       {mySales.map(sale => (
+                          <div 
+                            key={sale.id}
+                            onClick={() => onViewOrder && onViewOrder(sale, 'SALE')}
+                            className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
+                          >
+                             <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-white rounded-lg overflow-hidden border border-slate-200">
+                                   <img src={JSON.parse(sale.item?.image || '[]')[0]} className="w-full h-full object-cover" />
+                                </div>
+                                <div>
+                                   <p className="text-xs font-bold text-slate-800">{sale.item?.title}</p>
+                                   <p className="text-[10px] text-slate-500">Buyer: {sale.buyer?.full_name}</p>
+                                </div>
+                             </div>
+                             <div className="text-right">
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                                   sale.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 
+                                   sale.status === 'CANCELLED' ? 'bg-red-100 text-red-700' : 
+                                   'bg-amber-100 text-amber-700'
+                                }`}>
+                                   {sale.status}
+                                </span>
+                             </div>
+                          </div>
+                       ))}
                     </div>
                   </div>
                 )}
@@ -467,7 +499,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                         <p className="text-slate-500 text-sm font-medium mb-4">No {isPublic ? 'active' : activeTab.toLowerCase()} listings.</p>
                         {!isPublic && (
                           <button 
-                            onClick={() => onEditItem && onEditItem({} as Item)} // Just to trigger open sell view
+                            onClick={() => onEditItem && onEditItem({} as Item)} 
                             className="bg-slate-900 text-white px-6 py-2.5 rounded-full text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-colors"
                           >
                             <PlusCircle size={16} /> Start Selling
@@ -486,9 +518,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                        <ShoppingBag size={20} className="text-blue-500"/> Purchases
                     </h3>
                     <div className="space-y-4">
-                       {orders.purchases.length === 0 ? <p className="text-slate-400 text-sm text-center py-4">No purchases.</p> : 
-                          orders.purchases.map(p => (
-                             <div key={p.id} className="flex gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                       {myPurchases.length === 0 ? <p className="text-slate-400 text-sm text-center py-4">No purchases.</p> : 
+                          myPurchases.map(p => (
+                             <div 
+                               key={p.id} 
+                               onClick={() => onViewOrder && onViewOrder(p, 'PURCHASE')}
+                               className="flex gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer hover:border-blue-200 hover:bg-blue-50 transition-all"
+                             >
                                 <div className="w-12 h-12 bg-white rounded-xl overflow-hidden shadow-sm shrink-0">
                                    {p.item?.image && <img src={JSON.parse(p.item.image)[0]} className="w-full h-full object-cover" />}
                                 </div>
@@ -501,14 +537,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                                       <span className="text-xs font-medium text-slate-500">${p.amount}</span>
                                    </div>
                                 </div>
-                                {p.status === 'PENDING' && (
-                                  <button 
-                                    onClick={() => handleConfirmReceipt(p)}
-                                    className="px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg hover:bg-slate-700 shadow-lg shadow-slate-200"
-                                  >
-                                    Confirm Receipt
-                                  </button>
-                                )}
+                                <div className="flex items-center text-blue-600">
+                                   <ChevronRight size={20} />
+                                </div>
                              </div>
                           ))
                        }
@@ -523,7 +554,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                     <div className="space-y-4">
                        {orders.bookings.length === 0 ? <p className="text-slate-400 text-sm text-center py-4">No services booked.</p> : 
                           orders.bookings.map(b => (
-                             <div key={b.id} className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+                             <div 
+                               key={b.id} 
+                               onClick={() => onViewOrder && onViewOrder(b, 'BOOKING')}
+                               className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 cursor-pointer hover:bg-slate-50 transition-all"
+                             >
                                 <div className="flex-1">
                                    <p className="font-bold text-slate-900 text-sm">{b.service?.title}</p>
                                    <p className="text-xs text-slate-500">{new Date(b.booking_date).toLocaleString()}</p>
@@ -531,34 +566,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                                 <span className={`text-xs font-bold px-2 py-1 rounded-lg ${b.status === 'ACCEPTED' ? 'bg-green-100 text-green-700' : b.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
                                    {b.status}
                                 </span>
-                             </div>
-                          ))
-                       }
-                    </div>
-                 </div>
-
-                 {/* Sent Swap Proposals */}
-                 <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
-                    <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                       <Repeat size={20} className="text-purple-500"/> Sent Swap Offers
-                    </h3>
-                    <div className="space-y-4">
-                       {orders.swaps.length === 0 ? <p className="text-slate-400 text-sm text-center py-4">No swap proposals sent.</p> : 
-                          orders.swaps.map(s => (
-                             <div key={s.id} className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                                <div className="flex items-center gap-2 mb-2">
-                                   <span className="text-xs font-bold text-slate-500 uppercase">You offered</span>
-                                   <span className="font-bold text-slate-900 text-sm">{s.offeredItem?.title}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                   <span className="text-xs font-bold text-slate-500 uppercase">For</span>
-                                   <span className="font-bold text-slate-900 text-sm">{s.targetItem?.title}</span>
-                                </div>
-                                <div className="mt-3 text-right">
-                                   <span className={`text-xs font-bold px-2 py-1 rounded-lg ${s.status === 'ACCEPTED' ? 'bg-green-100 text-green-700' : s.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                                      Status: {s.status}
-                                   </span>
-                                </div>
                              </div>
                           ))
                        }
@@ -589,58 +596,46 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                                     </div>
                                     <span className="text-xs font-bold text-slate-400">Status: {b.status}</span>
                                  </div>
-                                 {b.status === 'REQUESTED' && (
-                                   <div className="flex gap-2 mt-2">
-                                      <button onClick={() => handleRespondBooking(b.id, 'ACCEPTED')} className="flex-1 py-2 bg-green-600 text-white rounded-xl font-bold text-xs">Accept</button>
-                                      <button onClick={() => handleRespondBooking(b.id, 'REJECTED')} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs">Decline</button>
-                                   </div>
-                                 )}
                               </div>
                            ))
                         }
                      </div>
                   </div>
-
-                  {/* Incoming Swap/Trade Offers */}
+                  
+                  {/* Swap Proposals */}
                   <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
                      <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <Inbox size={20} className="text-purple-500"/> Incoming Trade Offers
+                        <Repeat size={20} className="text-purple-500"/> Incoming Trade Offers
                      </h3>
                      <div className="space-y-4">
-                        {offers.length === 0 ? <p className="text-slate-400 text-sm text-center py-4">No open offers received.</p> : 
+                        {offers.length === 0 ? <p className="text-slate-400 text-sm text-center py-4">No active trade offers.</p> : 
                            offers.map(offer => (
-                              <div key={offer.id} className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3">
-                                 <div className="flex items-center gap-3">
-                                    <img src={offer.initiator?.avatar_url || `https://ui-avatars.com/api/?name=${offer.initiator?.full_name}`} className="w-10 h-10 rounded-full" />
-                                    <div>
-                                       <p className="font-bold text-slate-900 text-sm">{offer.initiator?.full_name} <span className="text-slate-500 font-normal">offered to trade for</span></p>
-                                       <p className="text-xs font-bold text-primary-600">{offer.targetItem?.title}</p>
+                              <div key={offer.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3">
+                                 <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                       <img src={offer.initiator?.avatar_url || `https://ui-avatars.com/api/?name=User`} className="w-8 h-8 rounded-full" />
+                                       <span className="text-sm font-bold text-slate-700">{offer.initiator?.full_name}</span>
+                                    </div>
+                                    <span className="text-[10px] bg-white border px-2 py-1 rounded text-slate-500">{new Date(offer.created_at).toLocaleDateString()}</span>
+                                 </div>
+                                 
+                                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-100">
+                                    <div className="w-10 h-10 bg-slate-100 rounded-lg overflow-hidden shrink-0">
+                                       <img src={JSON.parse(offer.offeredItem?.image || '[]')[0]} className="w-full h-full object-cover" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                       <p className="text-xs font-bold text-purple-700">Offered: {offer.offeredItem?.title}</p>
+                                       <p className="text-[10px] text-slate-400">Value: ${offer.offeredItem?.price}</p>
                                     </div>
                                  </div>
                                  
-                                 <div className="bg-slate-50 p-3 rounded-xl flex gap-3 border border-slate-100">
-                                    <div className="w-12 h-12 bg-white rounded-lg overflow-hidden shrink-0 border border-slate-200">
-                                       {offer.offeredItem?.image && <img src={JSON.parse(offer.offeredItem.image)[0]} className="w-full h-full object-cover" />}
-                                    </div>
-                                    <div>
-                                       <p className="font-bold text-slate-800 text-sm">{offer.offeredItem?.title}</p>
-                                       <p className="text-xs text-slate-500">Value: ${offer.offeredItem?.price}</p>
-                                    </div>
+                                 <div className="flex items-center gap-2">
+                                    <p className="text-xs text-slate-500">for your</p>
+                                    <p className="text-xs font-bold text-slate-800">{offer.targetItem?.title}</p>
                                  </div>
 
-                                 <div className="flex gap-2 mt-2">
-                                    <button 
-                                      onClick={() => handleRespondOffer(offer.id, 'ACCEPTED')}
-                                      className="flex-1 py-2 bg-green-600 text-white rounded-xl font-bold text-xs hover:bg-green-700 transition-colors"
-                                    >
-                                      Accept
-                                    </button>
-                                    <button 
-                                      onClick={() => handleRespondOffer(offer.id, 'REJECTED')}
-                                      className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200 transition-colors"
-                                    >
-                                      Reject
-                                    </button>
+                                 <div className="flex gap-2 mt-1">
+                                    <button onClick={() => onViewOrder && onViewOrder(offer, 'OFFER')} className="flex-1 bg-slate-900 text-white text-xs font-bold py-2 rounded-lg hover:bg-slate-800 transition-colors">View Details</button>
                                  </div>
                               </div>
                            ))
@@ -649,33 +644,53 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                   </div>
                </div>
             ) : viewMode === 'SAVED' ? (
-               <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 animate-fade-in">
-                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                     <Heart size={20} className="text-red-500"/> Saved Items
+               <div className="animate-fade-in">
+                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2 px-1">
+                     <Heart size={20} className="text-red-500"/> Watchlist
                   </h3>
-                  <div className="space-y-4">
-                     {savedItems.length === 0 ? (
-                       <div className="text-center py-12 flex flex-col items-center">
-                          <Heart size={32} className="text-slate-200 mb-2" />
-                          <p className="text-slate-400 text-sm">Your wishlist is empty.</p>
+                  
+                  {savedItems.length === 0 ? (
+                    <div className="bg-white rounded-3xl p-12 text-center flex flex-col items-center border border-slate-100 shadow-sm">
+                       <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+                          <Heart size={32} className="text-red-300" />
                        </div>
-                     ) : 
-                        savedItems.map(item => (
-                           <div key={item.id} className="flex items-center gap-4 p-3 hover:bg-slate-50 rounded-2xl transition-colors cursor-pointer group" onClick={() => onEditItem && onEditItem(item)}>
-                              <div className="w-16 h-16 bg-slate-100 rounded-xl overflow-hidden border border-slate-100">
-                                 {item.image && <img src={item.image} className="w-full h-full object-cover" />}
+                       <p className="text-slate-500 text-sm">Your wishlist is empty.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                        {savedItems.map((item, idx) => (
+                           <div key={item.id} className="relative group animate-slide-up" style={{ animationDelay: `${idx * 50}ms` }}>
+                              <ItemCard item={item} onClick={() => onEditItem && onEditItem(item)} />
+                              
+                              {/* Overlay Actions */}
+                              <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                 <button 
+                                   onClick={(e) => handleRemoveSaved(e, item.id)}
+                                   className="bg-white p-2 rounded-full shadow-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                   title="Remove from Watchlist"
+                                 >
+                                    <Trash2 size={16} />
+                                 </button>
+                                 <button 
+                                   onClick={(e) => { e.stopPropagation(); onStartChat && onStartChat({ id: item.sellerId || '', name: 'Seller' } as any) }}
+                                   className="bg-white p-2 rounded-full shadow-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                                   title="Chat with Seller"
+                                 >
+                                    <MessageCircle size={16} />
+                                 </button>
                               </div>
-                              <div className="flex-1">
-                                 <h4 className="font-bold text-slate-900 group-hover:text-primary-600 transition-colors">{item.title}</h4>
-                                 <p className="text-sm font-medium text-slate-500">${item.price}</p>
-                              </div>
-                              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-primary-50 group-hover:text-primary-500 transition-colors">
-                                 <ChevronRight size={16} />
-                              </div>
+
+                              {/* Price Drop Indicator */}
+                              {item.originalPrice && item.price < item.originalPrice && (
+                                 <div className="absolute top-2 left-2 bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-lg flex items-center gap-1 z-10">
+                                    <ArrowDown size={12} />
+                                    {Math.round(((item.originalPrice - item.price) / item.originalPrice) * 100)}% DROP
+                                 </div>
+                              )}
                            </div>
-                        ))
-                     }
-                  </div>
+                        ))}
+                    </div>
+                  )}
                </div>
             ) : (
                <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 animate-fade-in">
@@ -689,14 +704,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                               <div className="flex justify-between items-start mb-2">
                                  <div className="flex items-center gap-2">
                                     <img src={r.reviewerAvatar || `https://ui-avatars.com/api/?name=${r.reviewerName}`} className="w-8 h-8 rounded-full bg-slate-100" />
-                                    <span className="font-bold text-slate-900 text-sm">{r.reviewerName}</span>
+                                    <div>
+                                       <span className="font-bold text-slate-900 text-sm block">{r.reviewerName}</span>
+                                       <span className="text-[10px] text-slate-400">{new Date(r.createdAt).toLocaleDateString()}</span>
+                                    </div>
                                  </div>
                                  <div className="flex text-amber-400">
                                     {[...Array(r.rating)].map((_, i) => <Star key={i} size={12} fill="currentColor" />)}
                                  </div>
                               </div>
-                              <p className="text-slate-600 text-sm bg-slate-50 p-3 rounded-xl rounded-tl-none">"{r.comment}"</p>
-                              <p className="text-[10px] text-slate-400 mt-2 text-right">{new Date(r.createdAt).toLocaleDateString()}</p>
+                              <p className="text-slate-600 text-sm bg-slate-50 p-3 rounded-xl rounded-tl-none mb-2">"{r.comment}"</p>
+                              
+                              {r.tags && r.tags.length > 0 && (
+                                 <div className="flex gap-2 flex-wrap">
+                                    {r.tags.map((tag, i) => (
+                                       <span key={i} className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                          {tag}
+                                       </span>
+                                    ))}
+                                 </div>
+                              )}
                            </div>
                         ))
                      }
@@ -727,6 +754,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                    ) : (
                      // Private Sidebar
                      <>
+                       {/* Dashboard Button for Sellers */}
+                       <button onClick={onGoToDashboard} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors group">
+                          <div className="flex items-center gap-3">
+                             <div className="p-2 bg-slate-50 rounded-xl text-slate-500 group-hover:bg-white group-hover:shadow-sm transition-all">
+                                <LayoutDashboard size={18} />
+                             </div>
+                             <span className="font-bold text-sm text-slate-700">Seller Dashboard</span>
+                          </div>
+                          <ChevronRight size={14} className="text-slate-300 group-hover:text-primary-500" />
+                       </button>
+
                        <button onClick={() => setShowEditProfile(true)} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors group">
                           <div className="flex items-center gap-3">
                              <div className="p-2 bg-slate-50 rounded-xl text-slate-500 group-hover:bg-white group-hover:shadow-sm transition-all">

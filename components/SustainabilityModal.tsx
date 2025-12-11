@@ -1,6 +1,8 @@
-import React from 'react';
-import { X, Leaf, TrendingUp, Award, Zap, Droplets, Wind } from 'lucide-react';
+
+import React, { useEffect, useState } from 'react';
+import { X, Leaf, TrendingUp, Award, Zap, Droplets, Wind, Loader2 } from 'lucide-react';
 import { UserProfile } from '../types';
+import { api } from '../services/api';
 
 interface SustainabilityModalProps {
   isOpen: boolean;
@@ -9,20 +11,24 @@ interface SustainabilityModalProps {
 }
 
 export const SustainabilityModal: React.FC<SustainabilityModalProps> = ({ isOpen, onClose, user }) => {
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      api.getLeaderboard().then(data => {
+        setLeaderboard(data);
+        setLoading(false);
+      });
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   // Mock calculation based on user stats
   const co2Saved = Math.floor((user.savings || 0) * 0.15); // approx 0.15kg per dollar saved on used items
   const waterSaved = Math.floor((user.savings || 0) * 40); // liters
   const treesEquiv = (co2Saved / 20).toFixed(1); // 1 tree absorbs ~20kg co2/year
-
-  const leaderboard = [
-    { name: 'Sarah J.', points: 1250, avatar: 'https://ui-avatars.com/api/?name=Sarah+J&background=random' },
-    { name: 'Mike T.', points: 980, avatar: 'https://ui-avatars.com/api/?name=Mike+T&background=random' },
-    { name: 'You', points: user.savings || 0, avatar: user.avatar, highlight: true },
-    { name: 'Jessica L.', points: 450, avatar: 'https://ui-avatars.com/api/?name=Jessica+L&background=random' },
-    { name: 'David C.', points: 320, avatar: 'https://ui-avatars.com/api/?name=David+C&background=random' },
-  ].sort((a, b) => b.points - a.points);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
@@ -74,23 +80,31 @@ export const SustainabilityModal: React.FC<SustainabilityModalProps> = ({ isOpen
                  <span className="text-xs font-bold text-slate-400 uppercase">{user.college}</span>
               </div>
               <div className="divide-y divide-slate-50">
-                 {leaderboard.map((u, idx) => (
-                    <div 
-                      key={idx} 
-                      className={`p-4 flex items-center gap-4 ${u.highlight ? 'bg-emerald-50/50' : 'hover:bg-slate-50'} transition-colors`}
-                    >
-                       <div className="w-6 text-center font-black text-slate-300 text-lg">#{idx + 1}</div>
-                       <img src={u.avatar} className="w-10 h-10 rounded-full bg-slate-200 object-cover" alt={u.name} />
-                       <div className="flex-1">
-                          <p className={`text-sm ${u.highlight ? 'font-black text-emerald-900' : 'font-bold text-slate-700'}`}>{u.name}</p>
-                          {u.highlight && <p className="text-[10px] text-emerald-600 font-bold uppercase">That's You!</p>}
-                       </div>
-                       <div className="text-right">
-                          <p className="font-bold text-slate-900">{u.points}</p>
-                          <p className="text-[10px] text-slate-400 font-medium uppercase">Points</p>
-                       </div>
+                 {loading ? (
+                    <div className="p-6 text-center text-slate-400">
+                       <Loader2 className="animate-spin inline-block mr-2" size={16} /> Loading top savers...
                     </div>
-                 ))}
+                 ) : leaderboard.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 text-sm">No data available yet.</div>
+                 ) : (
+                    leaderboard.map((u, idx) => (
+                      <div 
+                        key={idx} 
+                        className={`p-4 flex items-center gap-4 ${u.full_name === user.name ? 'bg-emerald-50/50' : 'hover:bg-slate-50'} transition-colors`}
+                      >
+                         <div className="w-6 text-center font-black text-slate-300 text-lg">#{idx + 1}</div>
+                         <img src={u.avatar_url || `https://ui-avatars.com/api/?name=${u.full_name}`} className="w-10 h-10 rounded-full bg-slate-200 object-cover" alt={u.full_name} />
+                         <div className="flex-1">
+                            <p className={`text-sm ${u.full_name === user.name ? 'font-black text-emerald-900' : 'font-bold text-slate-700'}`}>{u.full_name}</p>
+                            {u.full_name === user.name && <p className="text-[10px] text-emerald-600 font-bold uppercase">That's You!</p>}
+                         </div>
+                         <div className="text-right">
+                            <p className="font-bold text-slate-900">{u.savings}</p>
+                            <p className="text-[10px] text-slate-400 font-medium uppercase">Points</p>
+                         </div>
+                      </div>
+                    ))
+                 )}
               </div>
            </div>
            

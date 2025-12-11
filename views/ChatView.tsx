@@ -1,9 +1,13 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Conversation, Message, UserProfile, Item } from '../types';
 import { api } from '../services/api';
 import { generateSmartReplies, getSafeMeetingSpots } from '../services/geminiService';
-import { ChevronLeft, Send, Image as ImageIcon, MoreVertical, ShieldCheck, MapPin, Phone, Ban, Loader2, Sparkles, X, Building2, CheckCircle2, XCircle, Calendar } from 'lucide-react';
+import { ChevronLeft, Send, Image as ImageIcon, MoreVertical, ShieldCheck, MapPin, Phone, Ban, Loader2, Sparkles, X, Building2, CheckCircle2, XCircle, Calendar, ShoppingBag, HandHeart, Leaf } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { PurchaseModal } from '../components/PurchaseModal';
+import { BookingModal } from '../components/BookingModal';
+import { FulfillModal } from '../components/FulfillModal';
 
 interface ChatViewProps {
   currentUser: UserProfile;
@@ -19,6 +23,15 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
   const [loading, setLoading] = useState(true);
   const [showOptions, setShowOptions] = useState(false);
   const [showMeetupModal, setShowMeetupModal] = useState(false);
+  
+  // Ensure we have the item details even if entered via Chat List
+  const [fetchedItem, setFetchedItem] = useState<Item | null>(null);
+  
+  // Transaction Modals
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showFulfillModal, setShowFulfillModal] = useState(false);
+
   const [uploading, setUploading] = useState(false);
   const [smartReplies, setSmartReplies] = useState<string[]>(["Hi, is this available?", "I'm interested!", "Can we meet nearby?"]);
   const [loadingReplies, setLoadingReplies] = useState(false);
@@ -31,6 +44,11 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
 
+  // Typing State
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+  const [typingSender, setTypingSender] = useState<any>(null); // To handle channel ref
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
@@ -38,7 +56,22 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
   const partnerId = activeConversation?.partnerId || targetItem?.sellerId || '';
   const partnerName = activeConversation?.partnerName || targetItem?.sellerName || 'Chat';
   const contextItemId = activeConversation?.itemId || targetItem?.id;
-  const contextItemTitle = activeConversation?.itemTitle || targetItem?.title || '';
+  
+  // Use fetched item if targetItem is missing (e.g. entering from list view)
+  const activeItem = targetItem || fetchedItem;
+  const contextItemTitle = activeConversation?.itemTitle || activeItem?.title || '';
+  const contextItemImage = activeConversation?.itemImage || activeItem?.image;
+  
+  const isSeller = activeItem?.sellerId === currentUser.id;
+
+  // Fetch Item Details if missing
+  useEffect(() => {
+    if (!targetItem && contextItemId && !fetchedItem) {
+       api.getItem(contextItemId).then(item => {
+         if(item) setFetchedItem(item);
+       });
+    }
+  }, [contextItemId, targetItem]);
 
   useEffect(() => {
     if (partnerId) {
@@ -50,7 +83,6 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
         if (msg.senderId === partnerId || msg.senderId === currentUser.id) {
            setMessages(prev => {
              const updated = [...prev, msg];
-             // Trigger smart replies update on incoming message
              if (msg.senderId === partnerId) updateSmartReplies(updated);
              return updated;
            });
@@ -60,7 +92,20 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
            }
         }
       });
-      return () => { subscription.unsubscribe(); };
+
+      // Typing Indicator Subscription
+      // We create a unique channel ID based on sorted user IDs to ensure 1:1 chat uniqueness
+      const channelId = [currentUser.id, partnerId].sort().join('-');
+      const typingSub = api.subscribeToTyping(channelId, (status) => {
+         setIsTyping(status);
+         if (status) scrollToBottom();
+      });
+      setTypingSender(typingSub);
+
+      return () => { 
+        subscription.unsubscribe(); 
+        typingSub.unsubscribe();
+      };
     }
   }, [partnerId]);
 
@@ -96,14 +141,12 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
   };
 
   const updateSmartReplies = async (currentMessages: Message[]) => {
-    // Only analyze last 5 messages to save tokens and keep relevance
     const recent = currentMessages.slice(-5).map(m => ({
       sender: m.senderId === currentUser.id ? 'ME' as const : 'THEM' as const,
       content: m.content
     }));
 
     if (recent.length === 0 && contextItemTitle) {
-       // Start of conversation
        setSmartReplies([
          `Is the ${contextItemTitle} still available?`,
          `Can I buy the ${contextItemTitle}?`,
@@ -143,6 +186,23 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
     setPendingPreview(null);
   };
 
+  // Handle Input Change & Typing Events
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+     setNewMessage(e.target.value);
+     
+     if (typingSender) {
+        typingSender.sendTyping(true);
+        
+        // Clear previous timeout
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        
+        // Set new timeout to stop typing after 2 seconds of inactivity
+        typingTimeoutRef.current = setTimeout(() => {
+           typingSender.sendTyping(false);
+        }, 2000);
+     }
+  };
+
   const sendMessage = async (content: string, imageUrl: string = '') => {
     try {
       const optimisticMsg: Message = {
@@ -159,13 +219,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
       const newMessages = [...messages, optimisticMsg];
       setMessages(newMessages);
       scrollToBottom();
-      
-      // Clear suggestions immediately after sending to avoid double sending
       setSmartReplies([]);
+      if (typingSender) typingSender.sendTyping(false);
 
       await api.sendMessage(currentUser.id, partnerId, content, contextItemId, imageUrl);
-      
-      // Regenerate replies based on my new message (anticipating follow-up)
       updateSmartReplies(newMessages);
 
     } catch (err) {
@@ -233,6 +290,105 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
     }
   };
 
+  // --- Transaction Handlers ---
+  const handleConfirmPurchase = async () => {
+    if (!activeItem) return;
+    try {
+      await api.createTransaction({
+        buyerId: currentUser.id,
+        sellerId: partnerId,
+        itemId: activeItem.id,
+        amount: activeItem.price
+      });
+      sendMessage(`[SYSTEM] Order placed for ${activeItem.title}.`);
+      setShowPurchaseModal(false);
+      showToast("Order Placed!", 'success');
+    } catch (e) {
+      showToast("Failed to create order", 'error');
+    }
+  };
+
+  const handleConfirmBooking = async (date: string, time: string) => {
+    if (!activeItem) return;
+    try {
+      await api.createBooking({
+        bookerId: currentUser.id,
+        providerId: partnerId,
+        serviceId: activeItem.id,
+        bookingDate: new Date(`${date}T${time}`).toISOString()
+      });
+      sendMessage(`[SYSTEM] Booking requested for ${date} at ${time}.`);
+      setShowBookingModal(false);
+      showToast("Booking Requested!", 'success');
+    } catch (e) {
+      showToast("Failed to book", 'error');
+    }
+  };
+
+  const handleFulfillRequest = async (offeredItemId: string) => {
+    if (!activeItem) return;
+    try {
+      await api.createSwapProposal({
+        initiatorId: currentUser.id,
+        receiverId: partnerId,
+        targetItemId: activeItem.id,
+        offeredItemId: offeredItemId
+      });
+      sendMessage(`[SYSTEM] Offer sent to fulfill request.`);
+      setShowFulfillModal(false);
+      showToast("Offer Sent!", 'success');
+    } catch (e) {
+      showToast("Failed to send offer", 'error');
+    }
+  };
+
+  const handlePrimaryAction = () => {
+    if (!activeItem || isSeller) {
+       if (contextItemId && onViewItem) onViewItem(contextItemId);
+       return;
+    }
+
+    if (activeItem.type === 'SALE' || activeItem.type === 'RENT') setShowPurchaseModal(true);
+    else if (activeItem.type === 'SERVICE') setShowBookingModal(true);
+    else if (activeItem.type === 'SHARE') sendMessage("Hi, I would like to borrow this item. When are you available?");
+    else if (activeItem.type === 'SWAP') sendMessage("Hi, I'm interested in trading. Check out my profile?");
+    else if (activeItem.type === 'REQUEST') setShowFulfillModal(true);
+  };
+
+  const getActionButtonLabel = () => {
+    if (isSeller) return 'Manage Listing';
+    if (!activeItem) return 'View Item';
+    switch (activeItem.type) {
+      case 'SALE': return 'Buy Now';
+      case 'RENT': return 'Rent Now';
+      case 'SERVICE': return 'Book Now';
+      case 'SHARE': return 'Request Item';
+      case 'SWAP': return 'Propose Swap';
+      case 'REQUEST': return 'Fulfill Request';
+      default: return 'View Item';
+    }
+  };
+
+  const getActionColor = () => {
+    if (!activeItem || isSeller) return 'bg-slate-900 shadow-slate-900/20 hover:bg-slate-800';
+    switch (activeItem.type) {
+      case 'REQUEST': return 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700';
+      case 'SHARE': return 'bg-emerald-600 shadow-emerald-200 hover:bg-emerald-700';
+      default: return 'bg-slate-900 shadow-slate-900/20 hover:bg-slate-800';
+    }
+  };
+
+  const getActionIcon = () => {
+    if (!activeItem) return null;
+    switch (activeItem.type) {
+      case 'REQUEST': return <HandHeart size={16} />;
+      case 'SHARE': return <Leaf size={16} />;
+      case 'SALE': return <ShoppingBag size={16} />;
+      case 'SERVICE': return <Calendar size={16} />;
+      default: return null;
+    }
+  };
+
   const renderMessageContent = (msg: Message, isMe: boolean) => {
     // Check for special Meetup Format
     if (msg.content.startsWith('[MEETUP_PROPOSAL]:::')) {
@@ -297,6 +453,14 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
            </div>
         </div>
       );
+    }
+
+    if (msg.content.startsWith('[SYSTEM]')) {
+       return (
+         <div className={`p-1 italic text-xs ${isMe ? 'text-white/80' : 'text-slate-500'}`}>
+            {msg.content.replace('[SYSTEM]', '')}
+         </div>
+       );
     }
 
     if (msg.content === '[MEETUP_DECLINED]') {
@@ -385,29 +549,24 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
       </div>
 
       {/* Item Context Banner */}
-      {(targetItem || (activeConversation?.itemTitle)) && (
+      {(activeItem || contextItemTitle) && (
         <div className="bg-white/60 backdrop-blur-md border-b border-slate-200/50 p-3 mx-4 mt-3 rounded-2xl flex items-center gap-3 shrink-0 shadow-sm z-20">
            <div className="w-12 h-12 bg-slate-100 rounded-xl overflow-hidden shrink-0 border border-slate-100">
               <img 
-                src={targetItem?.image || activeConversation?.itemImage || 'https://via.placeholder.com/50'} 
+                src={activeItem?.image || contextItemImage || 'https://via.placeholder.com/50'} 
                 className="w-full h-full object-cover" 
               />
            </div>
            <div className="flex-1 min-w-0">
-              <h4 className="font-bold text-slate-800 text-sm truncate">{targetItem?.title || activeConversation?.itemTitle}</h4>
-              <p className="text-xs font-bold text-primary-600">{targetItem ? `$${targetItem.price}` : 'Listing'}</p>
+              <h4 className="font-bold text-slate-800 text-sm truncate">{activeItem?.title || contextItemTitle}</h4>
+              <p className="text-xs font-bold text-primary-600">{activeItem ? `$${activeItem.price}` : 'Listing'}</p>
            </div>
+           
            <button 
-             onClick={() => {
-               if (onViewItem && contextItemId) {
-                 onViewItem(contextItemId);
-               } else if (targetItem && onViewItem) {
-                 onViewItem(targetItem.id);
-               }
-             }}
-             className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl shadow-lg shadow-slate-900/20 hover:scale-105 active:scale-95 transition-all"
+             onClick={handlePrimaryAction}
+             className={`px-4 py-2 ${getActionColor()} text-white text-xs font-bold rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1`}
            >
-             View Item
+             {getActionIcon()} {getActionButtonLabel()}
            </button>
         </div>
       )}
@@ -456,6 +615,16 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
               </React.Fragment>
             );
           })
+        )}
+        
+        {isTyping && (
+           <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
+              <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex gap-1.5 items-center">
+                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></div>
+                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-75"></div>
+                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-150"></div>
+              </div>
+           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -567,7 +736,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
                <input 
                  type="text" 
                  value={newMessage}
-                 onChange={(e) => setNewMessage(e.target.value)}
+                 onChange={handleInputChange}
                  placeholder={uploading ? "Sending..." : "Type a message..."}
                  disabled={uploading}
                  className="w-full bg-transparent border-none focus:ring-0 px-4 py-3.5 text-sm md:text-base max-h-32 placeholder:text-slate-400 font-medium"
@@ -582,6 +751,34 @@ export const ChatView: React.FC<ChatViewProps> = ({ currentUser, activeConversat
             </button>
          </form>
       </div>
+
+      {/* Transaction Modals */}
+      {activeItem && (
+        <>
+          <PurchaseModal 
+            isOpen={showPurchaseModal} 
+            onClose={() => setShowPurchaseModal(false)} 
+            itemTitle={activeItem.title}
+            price={activeItem.price}
+            onConfirm={handleConfirmPurchase}
+          />
+          <BookingModal
+            isOpen={showBookingModal}
+            onClose={() => setShowBookingModal(false)}
+            serviceTitle={activeItem.title}
+            price={activeItem.price}
+            onConfirm={handleConfirmBooking}
+          />
+          <FulfillModal 
+            isOpen={showFulfillModal}
+            onClose={() => setShowFulfillModal(false)}
+            requestTitle={activeItem.title}
+            requesterName={partnerName}
+            userId={currentUser.id}
+            onRequestFulfill={handleFulfillRequest}
+          />
+        </>
+      )}
     </div>
   );
 };

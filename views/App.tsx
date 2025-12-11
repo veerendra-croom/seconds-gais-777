@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { api } from '../services/api';
 import { UserProfile, Item, Conversation, ModuleType, Notification } from '../types';
@@ -18,8 +19,13 @@ import { VerificationView } from './views/VerificationView';
 import { CollegeLinkView } from './views/CollegeLinkView';
 import { AdminDashboard } from './views/AdminDashboard';
 import { StaticPages } from './views/StaticPages';
+import { OrderDetailView } from './views/OrderDetailView';
+import { NotificationsView } from './views/NotificationsView';
+import { QRScannerView } from './views/QRScannerView';
+import { SellerDashboardView } from './views/SellerDashboardView';
+import { SafetyView } from './views/SafetyView';
 import { OnboardingTour } from './components/OnboardingTour';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, Construction, Lock } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -29,6 +35,7 @@ const AppContent: React.FC = () => {
   
   // Navigation State
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<{data: any, type: 'PURCHASE' | 'SALE' | 'BOOKING' | 'OFFER'} | null>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
@@ -36,8 +43,17 @@ const AppContent: React.FC = () => {
   const [showTour, setShowTour] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
-  // Sidebar State for Desktop (Auto-closed on smaller desktops/tablets)
+  // App Config State
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  
+  // QR Scan State
+  const [scanContext, setScanContext] = useState<{expectedCode: string, orderId: string} | null>(null);
+  
+  // Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
+
+  // History State Tracker to prevent pushState loops
+  const isPoppingHistory = useRef(false);
 
   const { showToast } = useToast();
 
@@ -48,13 +64,18 @@ const AppContent: React.FC = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // Initial Config Load
+    api.getAppConfig('maintenance_mode').then(val => {
+       setMaintenanceMode(val === 'true');
+    });
+
     // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) fetchUserProfile(session.user.id);
       else {
         setLoading(false);
-        setCurrentView('LANDING');
+        changeView('LANDING', false);
       }
     });
 
@@ -64,30 +85,50 @@ const AppContent: React.FC = () => {
         fetchUserProfile(session.user.id);
       } else {
         setUserProfile(null);
-        setCurrentView('LANDING');
+        changeView('LANDING');
         setLoading(false);
       }
     });
 
-    // Auto-collapse sidebar on resize if screen gets too small
     const handleResize = () => {
        if (window.innerWidth <= 1024) setIsSidebarOpen(false);
        else setIsSidebarOpen(true);
     };
     window.addEventListener('resize', handleResize);
 
+    // Browser Back Button Handler
+    const handlePopState = (event: PopStateEvent) => {
+      if (event.state && event.state.view) {
+        isPoppingHistory.current = true;
+        setCurrentView(event.state.view);
+        // Optional: Restore context if you save it in state, e.g. event.state.itemId
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+
     return () => {
       subscription.unsubscribe();
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('popstate', handlePopState);
     };
   }, []);
 
-  // Scroll to top on view change
+  // Sync View changes to Browser History
   useEffect(() => {
+    if (isPoppingHistory.current) {
+      isPoppingHistory.current = false;
+      return;
+    }
+    // Push new state to history
+    window.history.pushState({ view: currentView }, '', `#${currentView.toLowerCase()}`);
     window.scrollTo(0, 0);
   }, [currentView]);
+
+  const changeView = (view: ModuleType, pushToHistory = true) => {
+    setCurrentView(view);
+  };
 
   const fetchUserProfile = async (userId: string) => {
     try {
@@ -96,11 +137,11 @@ const AppContent: React.FC = () => {
         setUserProfile(profile);
         // Determine initial view based on profile status
         if (profile.role === 'ADMIN') {
-          setCurrentView('ADMIN_DASHBOARD');
+          changeView('ADMIN_DASHBOARD');
         } else if (!profile.collegeEmailVerified && profile.role === 'STUDENT') {
-           setCurrentView('COLLEGE_LINK'); 
+           changeView('COLLEGE_LINK'); 
         } else {
-           setCurrentView('HOME');
+           changeView('HOME');
         }
         
         // Check for onboarding
@@ -121,32 +162,30 @@ const AppContent: React.FC = () => {
 
   const handleItemClick = (item: Item) => {
     setSelectedItem(item);
-    setCurrentView('ITEM_DETAIL');
+    changeView('ITEM_DETAIL');
   };
 
   const handleEditItem = (item: Item) => {
     setEditingItem(item);
-    setCurrentView('SELL');
+    changeView('SELL');
   };
 
   const handleSellBack = () => {
     if (editingItem) {
       setEditingItem(null);
-      setCurrentView('PROFILE');
+      changeView('SELLER_DASHBOARD');
     } else {
       setEditingItem(null);
-      setCurrentView('HOME');
+      changeView('HOME');
     }
   };
 
   const handleStartChat = async (item: Item) => {
     if (!userProfile) return;
     try {
-      // Find or create conversation logic could go here, or just navigate
-      // For now, we pass context to ChatView
       setSelectedItem(item);
-      setActiveConversation(null); // Clear active conversation to prioritize item context
-      setCurrentView('CHAT_ROOM');
+      setActiveConversation(null); 
+      changeView('CHAT_ROOM');
     } catch (e) {
       showToast("Could not start chat", 'error');
     }
@@ -162,19 +201,26 @@ const AppContent: React.FC = () => {
         unreadCount: 0
      });
      setSelectedItem(null);
-     setCurrentView('CHAT_ROOM');
+     changeView('CHAT_ROOM');
+  };
+
+  const handleStartChatById = (partnerId: string) => {
+     if (!userProfile) return;
+     api.getProfile(partnerId).then(partner => {
+        if(partner) handleStartChatWithUser(partner);
+     });
   };
 
   const handleViewProfile = async (userId: string) => {
     if (userProfile && userId === userProfile.id) {
-      setCurrentView('PROFILE');
+      changeView('PROFILE');
       return;
     }
     try {
       const profile = await api.getProfile(userId);
       if (profile) {
         setPublicProfile(profile);
-        setCurrentView('PUBLIC_PROFILE');
+        changeView('PUBLIC_PROFILE');
       }
     } catch (e) {
       showToast("Could not load profile", 'error');
@@ -184,35 +230,55 @@ const AppContent: React.FC = () => {
   const handleSelectChat = (conv: Conversation) => {
     setActiveConversation(conv);
     setSelectedItem(null); 
-    setCurrentView('CHAT_ROOM');
+    changeView('CHAT_ROOM');
   };
 
   const handleViewItemFromChat = async (itemId: string) => {
     try {
-      // If we already have the item loaded (e.g. started chat from item), use it
       if (selectedItem && selectedItem.id === itemId) {
-        setCurrentView('ITEM_DETAIL');
+        changeView('ITEM_DETAIL');
         return;
       }
-      // Otherwise fetch it
       const item = await api.getItem(itemId);
       if (item) {
         setSelectedItem(item);
-        setCurrentView('ITEM_DETAIL');
+        changeView('ITEM_DETAIL');
       }
     } catch (e) {
       console.error("Failed to load item from chat", e);
     }
   };
 
+  const handleViewOrder = (order: any, type: 'PURCHASE' | 'SALE' | 'BOOKING' | 'OFFER') => {
+     setSelectedOrder({ data: order, type });
+     changeView('ORDER_DETAIL');
+  };
+
+  const handleStartScan = (expectedCode: string, orderId: string) => {
+     setScanContext({ expectedCode, orderId });
+     changeView('QR_SCANNER');
+  };
+
+  const handleScanSuccess = async (code: string) => {
+     if (!userProfile || !scanContext) return;
+     try {
+       await api.confirmOrder(scanContext.orderId, userProfile.id);
+       showToast("Handover Verified! Order Complete.", 'success');
+       if (selectedOrder) {
+          setSelectedOrder(prev => prev ? ({...prev, data: {...prev.data, status: 'COMPLETED'}}) : null);
+       }
+       changeView('ORDER_DETAIL');
+     } catch (e) {
+       showToast("Verification failed.", 'error');
+     }
+  };
+
   const handleNotificationClick = (n: Notification) => {
-    if (n.link === 'CHAT_LIST') {
-      setCurrentView('CHAT_LIST');
-    } else if (n.link === 'MY_ORDERS') {
-      setCurrentView('MY_ORDERS');
-    } else if (n.link === 'PROFILE') {
-      setCurrentView('PROFILE');
-    } else if (n.link && n.link.startsWith('ITEM_DETAIL:')) {
+    api.markNotificationAsRead(n.id);
+    if (n.link === 'CHAT_LIST') changeView('CHAT_LIST');
+    else if (n.link === 'MY_ORDERS') changeView('MY_ORDERS');
+    else if (n.link === 'PROFILE') changeView('PROFILE');
+    else if (n.link && n.link.startsWith('ITEM_DETAIL:')) {
       const itemId = n.link.split(':')[1];
       handleViewItemFromChat(itemId);
     }
@@ -221,46 +287,79 @@ const AppContent: React.FC = () => {
   const handleViewChange = (view: ModuleType) => {
     if (currentView === 'SELL' && view !== 'SELL') setEditingItem(null);
     if (view === 'CHAT_LIST') setActiveConversation(null);
-    // Reset search when leaving marketplace if manually changing view
     if (view !== 'BUY' && view !== 'RENT' && view !== 'SHARE' && view !== 'SWAP' && view !== 'EARN' && view !== 'REQUEST') {
        setGlobalSearchQuery('');
     }
-    setCurrentView(view);
+    changeView(view);
   }
 
   const handleSearch = (query: string) => {
     setGlobalSearchQuery(query);
-    setCurrentView('BUY'); // Default to Buy module for results
+    changeView('BUY'); 
   };
 
   const renderView = () => {
-    // Public/Auth Views
-    if (currentView === 'LANDING') return <LandingView onGetStarted={() => setCurrentView('AUTH')} onViewPage={setCurrentView} />;
-    if (currentView === 'AUTH') return <AuthView onSuccess={() => window.location.reload()} onBack={() => setCurrentView('LANDING')} onViewPage={setCurrentView} />;
-    if (['TERMS', 'PRIVACY', 'SAFETY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView)) {
-      return <StaticPages type={currentView} onBack={() => userProfile ? setCurrentView('HOME') : setCurrentView('LANDING')} user={userProfile} />;
+    if (currentView === 'LANDING') return <LandingView onGetStarted={() => changeView('AUTH')} onViewPage={changeView} />;
+    if (currentView === 'AUTH') return <AuthView onSuccess={() => window.location.reload()} onBack={() => changeView('LANDING')} onViewPage={changeView} />;
+    if (['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView)) {
+      return <StaticPages type={currentView} onBack={() => userProfile ? changeView('HOME') : changeView('LANDING')} user={userProfile} />;
     }
 
     if (!userProfile) return <SplashView />;
 
-    // Authenticated Views
-    if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} />;
-    if (currentView === 'COLLEGE_LINK') return <CollegeLinkView userId={userProfile.id} onSuccess={() => setCurrentView('HOME')} />;
+    if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} onSwitchToApp={() => changeView('HOME')} />;
+    
+    if (maintenanceMode && userProfile.role !== 'ADMIN') {
+       return (
+         <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
+            <div className="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center mb-8">
+               <Construction size={48} className="text-amber-400" />
+            </div>
+            <h1 className="text-3xl font-black text-white mb-4">Under Maintenance</h1>
+            <p className="text-slate-400 max-w-sm leading-relaxed mb-8">
+               We are upgrading the Seconds platform to serve you better. Check back soon for a faster, safer marketplace.
+            </p>
+            <div className="flex gap-4">
+               <button onClick={() => window.location.reload()} className="px-6 py-3 bg-white text-slate-900 rounded-xl font-bold hover:bg-slate-200 transition-colors">
+                  Try Again
+               </button>
+               {userProfile.role === 'ADMIN' && (
+                 <button onClick={() => changeView('ADMIN_DASHBOARD')} className="px-6 py-3 border border-white/20 text-white rounded-xl font-bold hover:bg-white/10 flex items-center gap-2">
+                    <Lock size={16} /> Admin Access
+                 </button>
+               )}
+            </div>
+         </div>
+       );
+    }
+
+    if (currentView === 'COLLEGE_LINK') return <CollegeLinkView userId={userProfile.id} onSuccess={() => changeView('HOME')} />;
 
     switch (currentView) {
-      case 'HOME': return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
+      case 'HOME': return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
       case 'SELL': return <SellItem user={userProfile} onBack={handleSellBack} itemToEdit={editingItem} />;
-      case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} />;
-      case 'MY_ORDERS': return <ProfileView user={userProfile} onEditItem={handleEditItem} initialTab="BUYING" />;
+      case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} onViewOrder={handleViewOrder} onGoToDashboard={() => changeView('SELLER_DASHBOARD')} />;
+      case 'MY_ORDERS': return <ProfileView user={userProfile} onEditItem={handleEditItem} initialTab="BUYING" onViewOrder={handleViewOrder} />;
       case 'PUBLIC_PROFILE': 
         return publicProfile 
-          ? <ProfileView user={publicProfile} isPublic onStartChat={handleStartChatWithUser} onBack={() => setCurrentView('HOME')} /> 
+          ? <ProfileView user={publicProfile} isPublic onStartChat={handleStartChatWithUser} onBack={() => changeView('HOME')} /> 
           : <div className="p-20 text-center">Loading Profile...</div>;
       case 'ITEM_DETAIL': 
-        if (!selectedItem) return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
-        return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={() => setCurrentView('HOME')} onChat={handleStartChat} onViewProfile={handleViewProfile} onItemClick={handleItemClick} />;
-      case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={() => setCurrentView('HOME')} />;
-      case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={() => setCurrentView('CHAT_LIST')} onViewItem={handleViewItemFromChat} />;
+        if (!selectedItem) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
+        return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={() => window.history.back()} onChat={handleStartChat} onViewProfile={handleViewProfile} onItemClick={handleItemClick} />;
+      case 'ORDER_DETAIL':
+        if (!selectedOrder) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
+        return <OrderDetailView order={selectedOrder.data} type={selectedOrder.type} user={userProfile} onBack={() => window.history.back()} onChat={handleStartChatById} onScan={handleStartScan} />;
+      case 'NOTIFICATIONS': 
+        return <NotificationsView userId={userProfile.id} onBack={() => changeView('HOME')} onNotificationClick={handleNotificationClick} />;
+      case 'QR_SCANNER':
+        return <QRScannerView onBack={() => changeView('ORDER_DETAIL')} onScanSuccess={handleScanSuccess} expectedCode={scanContext?.expectedCode} />;
+      case 'SELLER_DASHBOARD': 
+        return <SellerDashboardView user={userProfile} onBack={() => changeView('PROFILE')} onEditItem={handleEditItem} />;
+      case 'SAFETY':
+        return <SafetyView user={userProfile} onBack={() => changeView('HOME')} onVerifyClick={() => changeView('COLLEGE_LINK')} />;
+      case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={() => changeView('HOME')} />;
+      case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={() => changeView('CHAT_LIST')} onViewItem={handleViewItemFromChat} />;
       case 'BUY':
       case 'RENT':
       case 'SHARE':
@@ -270,49 +369,42 @@ const AppContent: React.FC = () => {
         return <Marketplace 
           type={currentView} 
           user={userProfile} 
-          onBack={() => setCurrentView('HOME')} 
+          onBack={() => changeView('HOME')} 
           onItemClick={handleItemClick} 
           initialSearchQuery={globalSearchQuery} 
-          onSellClick={() => setCurrentView('SELL')}
+          onSellClick={() => changeView('SELL')}
         />;
-      default: return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
+      default: return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
     }
   };
 
   if (loading) return <SplashView />;
 
-  // Logic to determine if sidebar should be shown (same as render logic)
-  const showSidebar = userProfile && !['LANDING', 'AUTH', 'CHAT_ROOM', 'ITEM_DETAIL', 'ADMIN_DASHBOARD', 'COLLEGE_LINK', 'SELL'].includes(currentView) && !['TERMS', 'PRIVACY', 'SAFETY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView);
+  const showSidebar = userProfile && !maintenanceMode && !['LANDING', 'AUTH', 'CHAT_ROOM', 'ITEM_DETAIL', 'ADMIN_DASHBOARD', 'COLLEGE_LINK', 'SELL', 'ORDER_DETAIL', 'NOTIFICATIONS', 'QR_SCANNER', 'SELLER_DASHBOARD', 'SAFETY'].includes(currentView) && !['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      
-      {/* Offline Indicator */}
       {isOffline && (
         <div className="bg-slate-900 text-white text-xs font-bold py-2 text-center fixed top-0 left-0 right-0 z-[100] flex items-center justify-center gap-2 animate-slide-up">
            <WifiOff size={14} /> You are offline. Some features may be unavailable.
         </div>
       )}
 
-      {/* Show Navigation only for authenticated main views */}
       {showSidebar && (
         <Navigation 
-          currentView={currentView === 'MY_ORDERS' || currentView === 'PUBLIC_PROFILE' ? 'PROFILE' : currentView} 
+          currentView={currentView === 'MY_ORDERS' || currentView === 'PUBLIC_PROFILE' || currentView === 'ORDER_DETAIL' || currentView === 'NOTIFICATIONS' || currentView === 'SELLER_DASHBOARD' ? 'PROFILE' : currentView} 
           setView={handleViewChange} 
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
+          userRole={userProfile.role}
         />
       )}
       
-      {/* 
-         Main Content Wrapper 
-         Adjusts left padding on desktop when sidebar is open to prevent overlapping 
-      */}
       <main className={`transition-all duration-300 ease-in-out ${showSidebar && isSidebarOpen ? 'md:pl-64' : ''} ${isOffline ? 'pt-8' : ''}`}>
         {renderView()}
       </main>
 
-      {showTour && <OnboardingTour onComplete={handleTourComplete} />}
+      {showTour && !maintenanceMode && <OnboardingTour onComplete={handleTourComplete} />}
     </div>
   );
 };

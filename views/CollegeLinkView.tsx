@@ -31,13 +31,12 @@ export const CollegeLinkView: React.FC<CollegeLinkViewProps> = ({ userId, onSucc
     }
 
     try {
-      const code = await api.sendCollegeVerification(email);
+      await api.sendCollegeVerification(email);
       setStep('OTP');
-      // DEMO FEATURE: Show code in Toast
-      showToast(`Demo Code: ${code}`, 'success', 10000);
+      showToast("Verification code sent!", 'success');
     } catch (err: any) {
       console.error(err);
-      setError("Failed to send verification code. Please try again.");
+      setError("Failed to send verification code. Please check your network or try again later.");
     } finally {
       setLoading(false);
     }
@@ -116,7 +115,7 @@ export const CollegeLinkView: React.FC<CollegeLinkViewProps> = ({ userId, onSucc
         ) : (
           <form onSubmit={handleVerifyCode} className="space-y-4 animate-slide-up">
             <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-700 mb-4">
-               A verification code has been sent to <strong>{email}</strong>. Check your inbox (or toast message).
+               A verification code has been sent to <strong>{email}</strong>. Check your inbox.
             </div>
             
             <div className="text-left">

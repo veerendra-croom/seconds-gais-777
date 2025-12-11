@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { ModuleType, Item, UserProfile, Notification } from '../types';
-import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone } from 'lucide-react';
+import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone, BellRing } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
 import { analyzeImageForSearch } from '../services/geminiService';
@@ -30,7 +30,6 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
   const [showSustainability, setShowSustainability] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [analyzingImage, setAnalyzingImage] = useState(false);
@@ -39,6 +38,9 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
   const [enabledModules, setEnabledModules] = useState(allModules);
   const [appBanner, setAppBanner] = useState('');
   const [installPrompt, setInstallPrompt] = useState<any>(null);
+  
+  // Notification State
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
@@ -78,6 +80,11 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     fetchData();
     fetchNotifications();
     
+    // Check Notification Permission
+    if ('Notification' in window && Notification.permission === 'default') {
+       setTimeout(() => setShowNotificationPrompt(true), 3000); // Delay slightly
+    }
+    
     // Subscribe to realtime notifications
     const subscription = api.subscribeToNotifications(user.id, (newNotif) => {
        setNotifications(prev => [newNotif, ...prev]);
@@ -106,6 +113,27 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
       setNotifications(notes);
     } catch (e) { console.error(e); }
   }
+
+  const handleEnableNotifications = async () => {
+    if (!('Notification' in window)) return;
+    
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+       setShowNotificationPrompt(false);
+       showToast("Notifications enabled!", 'success');
+       
+       // Register Subscription via Service Worker
+       if ('serviceWorker' in navigator) {
+          const registration = await navigator.serviceWorker.ready;
+          // In real app, convert VAPID key: urlBase64ToUint8Array(publicVapidKey)
+          // const sub = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: ... });
+          // await api.registerPushDevice(user.id, sub);
+          console.log("Push registered (mock)");
+       }
+    } else {
+       setShowNotificationPrompt(false);
+    }
+  };
 
   const handleInstallClick = () => {
     if (!installPrompt) return;
@@ -194,26 +222,6 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     }
   };
 
-  const handleInternalNotificationClick = async (n: Notification) => {
-    // 1. Mark as read in DB
-    try {
-      await api.markNotificationAsRead(n.id);
-      setNotifications(prev => prev.map(notif => notif.id === n.id ? { ...notif, isRead: true } : notif));
-    } catch (e) {
-      console.error("Failed to mark notification read", e);
-    }
-
-    // 2. Navigation Logic
-    setShowNotifications(false);
-    if (onNotificationClick) {
-      onNotificationClick(n);
-    } else {
-      // Fallback if handler not provided
-      if (n.link === 'CHAT_LIST') onModuleSelect('CHAT_LIST');
-      else if (n.link === 'MY_ORDERS') onModuleSelect('MY_ORDERS');
-    }
-  };
-
   return (
     <div className="pb-32 md:pb-8 max-w-7xl mx-auto min-h-screen relative">
       {/* Voice Listening Overlay */}
@@ -253,13 +261,30 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
           </div>
           
           <button 
-            onClick={() => setShowNotifications(!showNotifications)}
+            onClick={() => onModuleSelect('NOTIFICATIONS')}
             className="glass w-12 h-12 rounded-full flex items-center justify-center relative shadow-sm hover:shadow-md transition-all active:scale-95"
           >
              <Bell className="text-slate-700" size={22} />
              {notifications.some(n => !n.isRead) && <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
           </button>
         </div>
+
+        {/* Notification Permission Banner */}
+        {showNotificationPrompt && (
+           <div className="mb-6 bg-slate-900 rounded-2xl p-4 flex items-center justify-between shadow-xl text-white animate-slide-up">
+              <div className="flex items-center gap-3">
+                 <div className="p-2 bg-white/10 rounded-xl"><BellRing size={20} /></div>
+                 <div>
+                    <p className="font-bold text-sm">Stay Updated</p>
+                    <p className="text-xs text-slate-400">Get alerts for new messages & offers</p>
+                 </div>
+              </div>
+              <div className="flex gap-2">
+                 <button onClick={() => setShowNotificationPrompt(false)} className="text-xs font-bold text-slate-400 hover:text-white p-2">Later</button>
+                 <button onClick={handleEnableNotifications} className="bg-white text-slate-900 px-4 py-2 rounded-xl text-xs font-bold shadow-lg hover:bg-slate-200">Enable</button>
+              </div>
+           </div>
+        )}
 
         {/* Floating Search */}
         <div className="relative z-30">
@@ -418,35 +443,6 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
           </div>
         )}
       </div>
-      
-      {/* Mobile Notification Sheet */}
-      {showNotifications && (
-        <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm md:hidden" onClick={() => setShowNotifications(false)}>
-           <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-6 shadow-2xl animate-slide-up max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-6">
-                 <h3 className="font-bold text-xl">Notifications</h3>
-                 <button onClick={() => setShowNotifications(false)} className="p-2 bg-slate-100 rounded-full"><X size={20}/></button>
-              </div>
-              <div className="space-y-3">
-                 {notifications.length === 0 ? <p className="text-center text-slate-400 py-10">No new alerts</p> : 
-                   notifications.map(n => (
-                     <button 
-                       key={n.id} 
-                       onClick={() => handleInternalNotificationClick(n)}
-                       className={`w-full text-left p-4 rounded-2xl border transition-all flex items-center justify-between group ${n.isRead ? 'bg-white border-slate-100' : 'bg-blue-50 border-blue-100'}`}
-                     >
-                        <div>
-                           <p className={`text-sm text-slate-900 ${n.isRead ? 'font-medium' : 'font-bold'}`}>{n.title}</p>
-                           <p className="text-xs text-slate-500 mt-1 line-clamp-1">{n.message}</p>
-                        </div>
-                        <ChevronRight size={16} className="text-slate-300 group-hover:text-primary-500" />
-                     </button>
-                   ))
-                 }
-              </div>
-           </div>
-        </div>
-      )}
 
       <SustainabilityModal isOpen={showSustainability} onClose={() => setShowSustainability(false)} user={user} />
     </div>

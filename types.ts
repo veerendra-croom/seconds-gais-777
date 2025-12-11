@@ -1,5 +1,5 @@
 
-export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS';
+export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'ORDER_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'NOTIFICATIONS' | 'QR_SCANNER' | 'SELLER_DASHBOARD' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS';
 
 export enum Category {
   ELECTRONICS = 'Electronics',
@@ -31,10 +31,13 @@ export interface Item {
   sellerId?: string; // Link to profile
   sellerName: string;
   college: string;
+  latitude?: number;
+  longitude?: number;
   rating: number;
   description: string;
   verified: boolean;
   status: 'ACTIVE' | 'SOLD' | 'DRAFT' | 'ARCHIVED';
+  views?: number;
 }
 
 export interface UserProfile {
@@ -58,6 +61,7 @@ export interface UserProfile {
     linkedin?: string;
     website?: string;
   };
+  trustedContacts?: string[]; // List of emails
 }
 
 export interface Badge {
@@ -105,9 +109,13 @@ export interface Transaction {
   buyerId: string;
   sellerId: string;
   amount: number;
-  status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
+  status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED';
   createdAt: string;
+  meetupCode?: string; // 6 digit secure code
+  meetupLocation?: string;
   item?: Item; // Joined data
+  buyer?: { full_name: string, avatar_url: string };
+  seller?: { full_name: string, avatar_url: string };
 }
 
 export interface Booking {
@@ -119,6 +127,8 @@ export interface Booking {
   status: 'REQUESTED' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED';
   createdAt: string;
   service?: Item; // Joined data
+  booker?: { full_name: string, avatar_url: string };
+  provider?: { full_name: string, avatar_url: string };
 }
 
 export interface SwapProposal {
@@ -131,14 +141,17 @@ export interface SwapProposal {
   createdAt: string;
   targetItem?: Item;
   offeredItem?: Item;
+  initiator?: { full_name: string, avatar_url: string };
 }
 
 export interface Review {
   id: string;
   reviewerId: string;
   targetUserId: string;
+  orderId?: string;
   rating: number;
   comment: string;
+  tags?: string[];
   createdAt: string;
   reviewerName?: string;
   reviewerAvatar?: string;
@@ -170,4 +183,12 @@ export interface BankAccount {
   bankName: string;
   last4: string;
   holderName: string;
+  
+}
+
+export interface Device {
+  id: string;
+  userId: string;
+  subscription: PushSubscription;
+  createdAt: string;
 }

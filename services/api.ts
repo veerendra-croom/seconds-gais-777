@@ -1,5 +1,7 @@
+
 import { supabase } from './supabaseClient';
 import { Item, Category, UserProfile, Notification, Conversation, Message, Review, Report, Transaction, Booking, SwapProposal, BankAccount, College } from '../types';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 const parseImages = (imageField: any): string[] => {
   if (Array.isArray(imageField)) return imageField;
@@ -59,6 +61,76 @@ const compressImage = async (file: File): Promise<Blob> => {
 };
 
 export const api = {
+  // --- UTILS ---
+  /**
+   * Geocodes a location string (e.g. "UCLA", "New York University") to Lat/Lng
+   * Uses OpenStreetMap Nominatim API (Free, No Key)
+   */
+  getCoordinates: async (location: string): Promise<{ lat: number, lng: number } | null> => {
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
+      const data = await response.json();
+      if (data && data.length > 0) {
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      }
+      return null;
+    } catch (e) {
+      console.error("Geocoding failed", e);
+      return null;
+    }
+  },
+
+  /**
+   * Registers a device for Push Notifications
+   */
+  registerPushDevice: async (userId: string, subscription: PushSubscription): Promise<void> => {
+    try {
+      // Upsert into devices table
+      const { error } = await supabase.from('devices').upsert({
+        user_id: userId,
+        subscription: subscription,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'subscription' }); // Assuming unique constraint on subscription JSON
+      
+      if (error) throw error;
+    } catch (e) {
+      console.warn("Failed to register device", e);
+    }
+  },
+
+  // --- EDGE FUNCTION HELPER ---
+  invokeFunction: async (functionName: string, body: any): Promise<any> => {
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      body: body
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  // --- PAYMENTS (STRIPE INTEGRATION) ---
+  
+  /**
+   * Calls the 'payment-sheet' Edge Function to initialize a Stripe Payment Intent.
+   * @param amount Amount in dollars (e.g. 25.00)
+   * @param currency Default 'usd'
+   */
+  createPaymentIntent: async (amount: number, currency: string = 'usd'): Promise<{ clientSecret: string, id: string } | null> => {
+    // Amount must be converted to cents for Stripe
+    const { data, error } = await supabase.functions.invoke('payment-sheet', {
+      body: { amount: Math.round(amount * 100), currency }
+    });
+    
+    if (error) throw error;
+    return data;
+  },
+
+  initiatePayout: async (userId: string, amount: number): Promise<void> => {
+    const { error } = await supabase.functions.invoke('payout-user', {
+      body: { userId, amount: Math.round(amount * 100) }
+    });
+    if (error) throw error;
+  },
+
   // --- ITEMS ---
   getItem: async (itemId: string): Promise<Item | null> => {
     const { data, error } = await supabase.from('items').select(`*, profiles:seller_id (full_name, college, verified, banned)`).eq('id', itemId).maybeSingle();
@@ -78,10 +150,13 @@ export const api = {
       sellerId: data.seller_id,
       sellerName: data.profiles?.full_name || 'Unknown',
       college: data.profiles?.college || data.college || 'Unknown',
+      latitude: data.latitude,
+      longitude: data.longitude,
       verified: data.profiles?.verified || false,
       rating: data.rating || 5.0,
       description: data.description,
-      status: data.status
+      status: data.status,
+      views: 0 // In real implementation, increment a view counter here
     };
   },
 
@@ -93,15 +168,12 @@ export const api = {
     page: number = 0, 
     limit: number = 12
   ): Promise<Item[]> => {
-    // If filtering by verification status, we need to use an inner join to filter on the joined 'profiles' table.
-    // Otherwise, standard left join is sufficient.
     const profileSelect = filters?.verifiedOnly ? 'profiles!inner' : 'profiles';
     
     let query = supabase.from('items')
       .select(`*, ${profileSelect}:seller_id (full_name, college, verified, banned)`)
       .eq('status', 'ACTIVE');
     
-    // Type Filter
     let dbType = type;
     if (type === 'BUY') dbType = 'SALE';
     if (type === 'EARN') dbType = 'SERVICE';
@@ -109,50 +181,31 @@ export const api = {
       query = query.eq('type', dbType);
     }
     
-    // Category Filter
     if (category !== 'All') query = query.eq('category', category);
 
-    // Search Filter
     if (searchQuery) {
       query = query.ilike('title', `%${searchQuery}%`);
     }
 
-    // Advanced Filters
     if (filters) {
       if (filters.minPrice !== undefined && filters.minPrice > 0) query = query.gte('price', filters.minPrice);
       if (filters.maxPrice !== undefined && filters.maxPrice > 0) query = query.lte('price', filters.maxPrice);
-      
-      // College Filter (Default to user's college, unless 'All' is specified)
       if (filters.college && filters.college !== 'All') {
         query = query.eq('college', filters.college);
       }
-
-      // Verification Filter (Handled via !inner join above + where clause here)
       if (filters.verifiedOnly) {
         query = query.eq(`${profileSelect}.verified`, true);
       }
-
-      // Rating Filter
       if (filters.minRating !== undefined && filters.minRating > 0) {
         query = query.gte('rating', filters.minRating);
       }
     }
 
-    // Explicitly exclude items from banned users (Note: accessing nested properties in filter varies by setup, 
-    // but typically !inner filters rows. If using left join, we filter in JS post-fetch for banned, or assume row policy handles it)
-    if (!filters?.verifiedOnly) {
-       // If standard join, we still prefer not to show banned users. 
-       // However, typical PostgREST filtering on embedded resource is tricky without !inner.
-       // We'll filter banned users in the map/filter block below for safety if not using inner join.
-    }
-
-    // Sorting
     if (filters?.sortBy === 'PRICE_ASC') {
       query = query.order('price', { ascending: true });
     } else if (filters?.sortBy === 'PRICE_DESC') {
       query = query.order('price', { ascending: false });
     } else {
-      // Default NEWEST
       query = query.order('created_at', { ascending: false });
     }
 
@@ -179,6 +232,8 @@ export const api = {
           sellerId: item.seller_id,
           sellerName: item.profiles?.full_name || 'Unknown',
           college: item.profiles?.college || item.college || 'Unknown',
+          latitude: item.latitude,
+          longitude: item.longitude,
           verified: item.profiles?.verified || false,
           rating: item.rating || 5.0,
           description: item.description,
@@ -244,7 +299,7 @@ export const api = {
        category: item.category as Category,
        type: item.type,
        sellerId: item.seller_id,
-       sellerName: '', // Populated elsewhere if needed
+       sellerName: '', 
        college: item.college,
        rating: item.rating || 5,
        description: item.description,
@@ -254,6 +309,12 @@ export const api = {
   },
 
   createItem: async (itemData: any, userId: string, college: string): Promise<Item | null> => {
+    // Lookup college coordinates to provide real geolocation
+    const collegeCoords = await api.getCoordinates(college);
+    // Apply jitter to not stack exactly on top of each other
+    const lat = collegeCoords ? collegeCoords.lat + (Math.random() - 0.5) * 0.005 : null;
+    const lng = collegeCoords ? collegeCoords.lng + (Math.random() - 0.5) * 0.005 : null;
+
     const { data, error } = await supabase.from('items').insert({
       seller_id: userId,
       title: itemData.title,
@@ -264,7 +325,9 @@ export const api = {
       type: itemData.type,
       image: JSON.stringify(itemData.images),
       college: college,
-      status: itemData.status
+      status: itemData.status,
+      latitude: lat,
+      longitude: lng
     }).select().single();
     
     if (error) throw error;
@@ -343,7 +406,8 @@ export const api = {
       bio: data.bio,
       socialLinks: data.social_links,
       collegeEmail: data.college_email,
-      collegeEmailVerified: data.college_email_verified
+      collegeEmailVerified: data.college_email_verified,
+      trustedContacts: data.trusted_contacts
     };
   },
 
@@ -365,6 +429,13 @@ export const api = {
        avatar_url: updates.avatar,
        bio: updates.bio,
        social_links: updates.socialLinks
+    }).eq('id', userId);
+    if (error) throw error;
+  },
+
+  updateTrustedContacts: async (userId: string, contacts: string[]): Promise<void> => {
+    const { error } = await supabase.from('profiles').update({
+       trusted_contacts: contacts
     }).eq('id', userId);
     if (error) throw error;
   },
@@ -400,6 +471,14 @@ export const api = {
     });
 
     return Object.entries(monthlyData).map(([name, earnings]) => ({ name, earnings }));
+  },
+
+  getLeaderboard: async (): Promise<any[]> => {
+    const { data } = await supabase.from('profiles')
+      .select('full_name, savings, avatar_url')
+      .order('savings', { ascending: false })
+      .limit(5);
+    return data || [];
   },
 
   // --- NOTIFICATIONS & SAVED ---
@@ -445,23 +524,26 @@ export const api = {
     if (error) return [];
     return data.map((row: any) => {
        const item = row.items;
+       if (!item) return null;
+       const images = parseImages(item.image);
        return {
           id: item.id,
           title: item.title,
           price: item.price,
-          image: parseImages(item.image)[0],
-          images: parseImages(item.image),
+          originalPrice: item.original_price,
+          image: images[0] || '',
+          images: images,
           category: item.category as Category,
           type: item.type,
           sellerId: item.seller_id,
           sellerName: 'Unknown',
           college: item.college,
-          rating: 5,
+          rating: item.rating || 5,
           description: item.description,
           verified: false,
           status: item.status
        };
-    });
+    }).filter(Boolean);
   },
 
   checkIsSaved: async (userId: string, itemId: string): Promise<boolean> => {
@@ -484,8 +566,8 @@ export const api = {
 
   getUserOrders: async (userId: string): Promise<{purchases: any[], bookings: any[], swaps: any[]}> => {
     const [purchases, bookings, swaps] = await Promise.all([
-       supabase.from('transactions').select('*, item:items(*)').eq('buyer_id', userId),
-       supabase.from('bookings').select('*, service:items(*)').eq('booker_id', userId),
+       supabase.from('transactions').select('*, item:items(*), seller:profiles!seller_id(*), buyer:profiles!buyer_id(*)').or(`buyer_id.eq.${userId},seller_id.eq.${userId}`).order('created_at', { ascending: false }),
+       supabase.from('bookings').select('*, service:items(*), provider:profiles!provider_id(*), booker:profiles!booker_id(*)').or(`booker_id.eq.${userId},provider_id.eq.${userId}`).order('booking_date', { ascending: false }),
        supabase.from('swap_proposals').select('*, offeredItem:offered_item_id(*), targetItem:target_item_id(*)').eq('initiator_id', userId)
     ]);
     return {
@@ -555,10 +637,31 @@ export const api = {
      if (error) throw error;
   },
 
+  // --- REALTIME SUBSCRIPTIONS ---
+
+  subscribeToOrder: (orderId: string, type: 'TRANSACTION' | 'BOOKING', callback: (payload: any) => void) => {
+    const table = type === 'TRANSACTION' ? 'transactions' : 'bookings';
+    return supabase.channel(`order-${orderId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: table, filter: `id=eq.${orderId}` }, 
+      (payload) => {
+         callback(payload.new);
+      })
+      .subscribe();
+  },
+
+  subscribeToNewItems: (college: string, callback: () => void) => {
+    return supabase.channel(`new-items-${college}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'items', filter: `college=eq.${college}` }, 
+      () => {
+         callback();
+      })
+      .subscribe();
+  },
+
   // --- REVIEWS & REPORTS ---
 
   getReviews: async (userId: string): Promise<Review[]> => {
-     const { data, error } = await supabase.from('reviews').select('*, reviewer:profiles!reviewer_id(full_name, avatar_url)').eq('target_user_id', userId);
+     const { data, error } = await supabase.from('reviews').select('*, reviewer:profiles!reviewer_id(full_name, avatar_url)').eq('target_user_id', userId).order('created_at', { ascending: false });
      if (error) return [];
      return data.map((r: any) => ({
         id: r.id,
@@ -566,6 +669,7 @@ export const api = {
         targetUserId: r.target_user_id,
         rating: r.rating,
         comment: r.comment,
+        tags: r.tags || [],
         createdAt: r.created_at,
         reviewerName: r.reviewer?.full_name,
         reviewerAvatar: r.reviewer?.avatar_url
@@ -576,10 +680,17 @@ export const api = {
      const { error } = await supabase.from('reviews').insert({
         reviewer_id: data.reviewerId,
         target_user_id: data.targetUserId,
+        order_id: data.orderId,
         rating: data.rating,
-        comment: data.comment
+        comment: data.comment,
+        tags: data.tags
      });
      if (error) throw error;
+  },
+
+  hasUserReviewedOrder: async (orderId: string, userId: string): Promise<boolean> => {
+     const { data } = await supabase.from('reviews').select('id').eq('order_id', orderId).eq('reviewer_id', userId).maybeSingle();
+     return !!data;
   },
 
   createReport: async (data: any): Promise<void> => {
@@ -592,7 +703,7 @@ export const api = {
      if (error) throw error;
   },
 
-  // --- MESSAGING ---
+  // --- MESSAGING & TYPING ---
 
   getConversations: async (userId: string): Promise<Conversation[]> => {
      const { data: messages, error } = await supabase
@@ -698,6 +809,30 @@ export const api = {
       .subscribe();
   },
 
+  // Real-time Typing Indicators using Supabase Broadcast
+  subscribeToTyping: (channelId: string, callback: (isTyping: boolean) => void): { sendTyping: (isTyping: boolean) => void, unsubscribe: () => void } => {
+    const channel = supabase.channel(`typing:${channelId}`);
+    
+    channel
+      .on('broadcast', { event: 'typing' }, (payload) => {
+         callback(payload.isTyping);
+      })
+      .subscribe();
+
+    return {
+       sendTyping: (isTyping: boolean) => {
+          channel.send({
+             type: 'broadcast',
+             event: 'typing',
+             payload: { isTyping }
+          });
+       },
+       unsubscribe: () => {
+          supabase.removeChannel(channel);
+       }
+    };
+  },
+
   blockUser: async (blockerId: string, blockedId: string): Promise<void> => {
      const { error } = await supabase.from('blocked_users').insert({ blocker_id: blockerId, blocked_id: blockedId });
      if (error && error.code !== '23505') throw error;
@@ -743,12 +878,21 @@ export const api = {
 
   sendCollegeVerification: async (email: string): Promise<string> => {
      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+     
+     // 1. Persist the code first
      const { error } = await supabase.from('verification_codes').insert({
         email: email,
         code: otp
      });
      if (error) throw error;
-     console.log(`%c[EMAILING SERVICE] Verification Code for ${email}: ${otp}`, 'color: #0ea5e9; font-weight: bold; font-size: 14px;');
+
+     // 2. Try sending the real email via Edge Function
+     await api.invokeFunction('send-email', { 
+       email, 
+       code: otp, 
+       type: 'VERIFY' 
+     });
+     
      return otp;
   },
 
@@ -787,7 +931,7 @@ export const api = {
     return null;
   },
 
-  // --- ADMIN ---
+  // --- ADMIN (EXPANDED) ---
 
   checkAdminCode: async (code: string): Promise<boolean> => {
      const { data } = await supabase.from('app_config').select('value').eq('key', 'admin_signup_code').single();
@@ -885,13 +1029,50 @@ export const api = {
     return data || [];
   },
 
+  adminGetAllTransactions: async (page: number, limit: number, status?: string): Promise<{transactions: any[], count: number}> => {
+    let query = supabase.from('transactions')
+      .select('*, buyer:profiles!buyer_id(full_name), seller:profiles!seller_id(full_name), item:items(title)', { count: 'exact' });
+    
+    if (status) query = query.eq('status', status);
+    query = query.order('created_at', { ascending: false });
+
+    const { data, count } = await query.range(page * limit, (page + 1) * limit - 1);
+    return { transactions: data || [], count: count || 0 };
+  },
+
+  adminManageTransaction: async (txnId: string, action: 'REFUND' | 'RELEASE'): Promise<void> => {
+    // In a real app, this would call Stripe to process refunds
+    if (action === 'REFUND') {
+       await supabase.from('transactions').update({ status: 'CANCELLED' }).eq('id', txnId);
+    } else {
+       await supabase.from('transactions').update({ status: 'COMPLETED' }).eq('id', txnId);
+    }
+  },
+
+  adminBroadcastNotification: async (title: string, message: string): Promise<void> => {
+    // Fetch all user IDs
+    const { data: users } = await supabase.from('profiles').select('id');
+    if (!users) return;
+
+    // Create notifications in batches
+    const notifications = users.map(u => ({
+       user_id: u.id,
+       type: 'SYSTEM',
+       title,
+       message,
+       link: 'HOME'
+    }));
+
+    await supabase.from('notifications').insert(notifications);
+  },
+
   adminGetPendingVerifications: async (): Promise<any[]> => {
      const { data } = await supabase.from('profiles').select('*').eq('college_email_verified', true).eq('verified', false).eq('role', 'STUDENT');
      return data || [];
   },
 
   adminGetReports: async (): Promise<Report[]> => {
-     const { data } = await supabase.from('reports').select('*, item:items(*)').eq('status', 'PENDING');
+     const { data } = await supabase.from('reports').select('*, item:items(*)').neq('reason', 'SUPPORT_TICKET').eq('status', 'PENDING');
      if (!data) return [];
      return data.map((r: any) => ({
         id: r.id,
@@ -904,12 +1085,35 @@ export const api = {
      }));
   },
 
+  adminGetSupportTickets: async (): Promise<any[]> => {
+     // Reports with reason starting with [SUPPORT
+     const { data } = await supabase.from('reports').select('*, reporter:profiles!reporter_id(*)').ilike('reason', '[SUPPORT%').eq('status', 'PENDING');
+     return data || [];
+  },
+
   adminGetAllUsers: async (page: number, limit: number, search: string): Promise<{users: any[], count: number}> => {
      let query = supabase.from('profiles').select('*', { count: 'exact' });
      if (search) query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
      
      const { data, count } = await query.range(page * limit, (page + 1) * limit - 1);
      return { users: data || [], count: count || 0 };
+  },
+
+  // Deep inspection for Admin User Detail View
+  adminGetUserDetail: async (userId: string): Promise<any> => {
+     const [profile, items, transactions, reports] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', userId).single(),
+        supabase.from('items').select('*').eq('seller_id', userId),
+        supabase.from('transactions').select('*, item:items(title)').or(`buyer_id.eq.${userId},seller_id.eq.${userId}`).order('created_at', { ascending: false }),
+        supabase.from('reports').select('*').eq('reporter_id', userId)
+     ]);
+     
+     return {
+        profile: profile.data,
+        items: items.data || [],
+        transactions: transactions.data || [],
+        reports: reports.data || []
+     };
   },
 
   adminVerifyUser: async (userId: string, approve: boolean): Promise<void> => {
@@ -932,6 +1136,12 @@ export const api = {
         await api.deleteItem(itemId);
      }
      await supabase.from('reports').update({ status: 'RESOLVED' }).eq('id', reportId);
+  },
+
+  // Audit Logs (using notifications table for simplicity in this implementation, real app would have dedicated table)
+  adminGetAuditLogs: async (): Promise<any[]> => {
+     const { data } = await supabase.from('notifications').select('*').eq('type', 'SYSTEM').order('created_at', { ascending: false }).limit(50);
+     return data || [];
   },
 
   subscribeToAdminEvents: (callback: () => void) => {
@@ -973,8 +1183,12 @@ export const api = {
   },
 
   withdrawFunds: async (userId: string, amount: number): Promise<void> => {
+     // 1. Deduct locally
      const { error } = await supabase.rpc('withdraw_funds', { p_user_id: userId, p_amount: amount });
      if (error) throw error;
+
+     // 2. Trigger Stripe Payout via Edge Function
+     await api.invokeFunction('payout-user', { userId, amount: Math.round(amount * 100) });
   },
 
   deleteAccount: async (userId: string): Promise<void> => {

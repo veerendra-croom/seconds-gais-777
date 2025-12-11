@@ -114,18 +114,14 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ isOpen, onClose, i
     
     try {
       // 1. Attempt to create Payment Intent (calls Edge Function)
-      // If function is not deployed/found, this returns null (handled in api.ts)
+      // If function is not deployed/found, this will throw
       const paymentIntent = await api.createPaymentIntent(total);
       
-      // 2. Simulate processing delay (Stripe confirmation would happen here)
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      if (paymentIntent) {
-         // Real Backend Flow: Confirm with Stripe
-         console.log("Processing with Stripe Secret:", paymentIntent.clientSecret);
-      } else {
-         // Fallback Demo Mode
-         console.log("Demo Mode: Payment Successful");
+      // In a real app with proper Stripe JS Elements, you would use stripe.confirmCardPayment here.
+      // Since we can't load the full Stripe JS SDK in this environment, getting the clientSecret
+      // serves as proof that the backend connection works.
+      if (!paymentIntent || !paymentIntent.clientSecret) {
+         throw new Error("Payment server unavailable.");
       }
 
       // 3. Finalize Order in Database
@@ -140,7 +136,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ isOpen, onClose, i
 
     } catch (err: any) {
       console.error(err);
-      setError("Payment failed. Please try again.");
+      setError("Payment processing failed. Please ensure the payment backend is deployed.");
     } finally {
       setLoading(false);
     }

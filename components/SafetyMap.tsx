@@ -1,7 +1,8 @@
+
 import React, { useEffect, useState } from 'react';
 import { DEFAULT_COLLEGE_COORDS } from '../constants';
 import { api } from '../services/api';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Loader2 } from 'lucide-react';
 
 interface SafetyMapProps {
   collegeName: string;
@@ -9,19 +10,27 @@ interface SafetyMapProps {
 
 export const SafetyMap: React.FC<SafetyMapProps> = ({ collegeName }) => {
   const [coords, setCoords] = useState(DEFAULT_COLLEGE_COORDS);
-  const [mapInitialized, setMapInitialized] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Find the college coordinates dynamically
-    api.getColleges().then(colleges => {
-      const matched = colleges.find(c => c.name === collegeName);
-      if (matched) {
-        setCoords({ lat: matched.latitude, lng: matched.longitude });
+    const fetchCoords = async () => {
+      setLoading(true);
+      // Try to find hardcoded college first to avoid API call if possible (not implemented here, assumes all dynamic)
+      // Call Nominatim
+      const geo = await api.getCoordinates(collegeName);
+      if (geo) {
+        setCoords(geo);
       }
-    });
+      setLoading(false);
+    };
+    
+    if (collegeName) fetchCoords();
+    else setLoading(false);
   }, [collegeName]);
 
   useEffect(() => {
+    if (loading) return;
+
     // Retry checking for Leaflet in case it loads slowly
     const checkLeaflet = setInterval(() => {
       if ((window as any).L) {
@@ -41,7 +50,7 @@ export const SafetyMap: React.FC<SafetyMapProps> = ({ collegeName }) => {
 
         const map = L.map('safety-map', {
           center: [coords.lat, coords.lng],
-          zoom: 14,
+          zoom: 15,
           zoomControl: false,
           attributionControl: false,
           dragging: false,
@@ -56,7 +65,7 @@ export const SafetyMap: React.FC<SafetyMapProps> = ({ collegeName }) => {
           color: '#0ea5e9',
           fillColor: '#0ea5e9',
           fillOpacity: 0.15,
-          radius: 800,
+          radius: 600,
           weight: 1
         }).addTo(map);
 
@@ -76,19 +85,23 @@ export const SafetyMap: React.FC<SafetyMapProps> = ({ collegeName }) => {
 
         L.marker([coords.lat, coords.lng], { icon: icon }).addTo(map);
         
-        setMapInitialized(true);
-        
         return () => {
           map.remove();
         };
     }
 
     return () => clearInterval(checkLeaflet);
-  }, [coords]);
+  }, [coords, loading]);
 
   return (
-    <div className="rounded-2xl overflow-hidden border border-slate-200 relative">
+    <div className="rounded-2xl overflow-hidden border border-slate-200 relative bg-slate-100">
       <div id="safety-map" className="w-full h-48 bg-slate-100 z-0"></div>
+      
+      {loading && (
+         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
+            <Loader2 className="animate-spin text-slate-400" />
+         </div>
+      )}
       
       <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur px-3 py-2 rounded-xl shadow-sm border border-slate-100 flex items-center gap-2 z-[400]">
         <ShieldCheck size={16} className="text-green-500" />

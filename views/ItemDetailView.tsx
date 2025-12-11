@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Item, UserProfile, Review, Badge } from '../types';
 import { api } from '../services/api';
-import { analyzePrice } from '../services/geminiService';
-import { ChevronLeft, Share2, Heart, MapPin, ShieldCheck, MessageCircle, ShoppingBag, Calendar, AlertTriangle, User, ChevronRight, Repeat, Flag, Star, HandHeart, AlertCircle, TrendingUp, Sparkles } from 'lucide-react';
+import { analyzePrice, analyzeSustainability } from '../services/geminiService';
+import { ChevronLeft, Share2, Heart, MapPin, ShieldCheck, MessageCircle, ShoppingBag, Calendar, AlertTriangle, User, ChevronRight, Repeat, Flag, Star, HandHeart, AlertCircle, TrendingUp, Sparkles, Clock, Leaf, Droplets } from 'lucide-react';
 import { BookingModal } from '../components/BookingModal';
 import { PurchaseModal } from '../components/PurchaseModal';
 import { SwapModal } from '../components/SwapModal';
@@ -33,8 +33,9 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
   const [similarItems, setSimilarItems] = useState<Item[]>([]);
   const { showToast } = useToast();
   
-  // AI Price Insight State
+  // AI Insights State
   const [priceInsight, setPriceInsight] = useState<{ verdict: string, estimatedRange: string, reason: string } | null>(null);
+  const [ecoImpact, setEcoImpact] = useState<{ co2Saved: string, waterSaved: string, fact: string } | null>(null);
   
   const [showBooking, setShowBooking] = useState(false);
   const [showPurchase, setShowPurchase] = useState(false);
@@ -52,6 +53,7 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
     // Reset state when item changes
     setCurrentImageIndex(0);
     setPriceInsight(null);
+    setEcoImpact(null);
     window.scrollTo(0, 0);
 
     if (item.sellerId) {
@@ -67,9 +69,10 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
     // Fetch Similar Items
     api.getSimilarItems(item.category, item.id).then(setSimilarItems);
 
-    // AI Price Analysis
-    if (item.type === 'SALE' && item.price > 0) {
-       analyzePrice(item.title, item.price).then(setPriceInsight);
+    // AI Analysis
+    if (item.type === 'SALE') {
+       if (item.price > 0) analyzePrice(item.title, item.price).then(setPriceInsight);
+       analyzeSustainability(item.title, item.category).then(setEcoImpact);
     }
 
   }, [item.id, currentUser.id]);
@@ -193,6 +196,33 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
     }
   };
 
+  // Helper for Button Label
+  const getActionLabel = () => {
+    if (isSold) return 'Item Sold';
+    switch (item.type) {
+      case 'SALE': return 'Buy Now';
+      case 'RENT': return 'Chat to Rent';
+      case 'SHARE': return 'Chat to Borrow';
+      case 'SWAP': return 'Propose Trade';
+      case 'REQUEST': return 'Fulfill Request';
+      case 'SERVICE': return 'Book Service';
+      default: return 'Contact Seller';
+    }
+  };
+
+  // Helper for Button Icon
+  const getActionIcon = () => {
+    switch (item.type) {
+      case 'SALE': return <ShoppingBag size={20} />;
+      case 'RENT': return <Clock size={20} />;
+      case 'SHARE': return <Leaf size={20} />;
+      case 'SWAP': return <Repeat size={20} />;
+      case 'REQUEST': return <HandHeart size={20} />;
+      case 'SERVICE': return <Calendar size={20} />;
+      default: return <MessageCircle size={20} />;
+    }
+  };
+
   return (
     <div className="pb-32 md:pb-8 bg-white min-h-screen flex flex-col relative animate-fade-in">
       {/* Floating Back Button */}
@@ -289,38 +319,74 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
                 <MapPin size={16} /> {item.college}
               </div>
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="text-4xl font-black text-slate-900 tracking-tight">${item.price}</span>
-                {item.originalPrice && <span className="text-lg text-slate-400 line-through decoration-2">${item.originalPrice}</span>}
+                <span className="text-4xl font-black text-slate-900 tracking-tight">
+                  {item.type === 'REQUEST' ? `Budget: $${item.price}` : `$${item.price}`}
+                </span>
+                {item.type === 'RENT' && <span className="text-sm font-bold text-slate-400">/ day</span>}
+                {item.type === 'SERVICE' && <span className="text-sm font-bold text-slate-400">/ hour</span>}
+                {item.originalPrice && item.type === 'SALE' && <span className="text-lg text-slate-400 line-through decoration-2">${item.originalPrice}</span>}
               </div>
             </div>
 
-            {/* AI Price Insight Card */}
-            {priceInsight && !isOwnItem && (
-              <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-2xl p-4 border border-indigo-100 flex items-start gap-4 animate-fade-in relative overflow-hidden">
-                 <div className="absolute top-0 right-0 p-3 opacity-10 pointer-events-none">
-                    <Sparkles size={64} className="text-indigo-500" />
-                 </div>
-                 
-                 <div className="bg-white p-2.5 rounded-xl shadow-sm text-indigo-600 shrink-0">
-                    <TrendingUp size={24} />
-                 </div>
-                 <div className="flex-1 relative z-10">
-                    <div className="flex justify-between items-center mb-1">
-                       <h4 className="font-bold text-indigo-900 text-sm">Market Insight</h4>
-                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${priceInsight.verdict === 'Great Deal' ? 'bg-green-100 text-green-700' : priceInsight.verdict === 'Overpriced' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                          {priceInsight.verdict}
-                       </span>
+            {/* AI Insights & Eco-Impact */}
+            <div className="grid grid-cols-1 gap-4">
+               {priceInsight && !isOwnItem && item.type === 'SALE' && (
+                 <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-2xl p-4 border border-indigo-100 flex items-start gap-4 animate-fade-in relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-3 opacity-10 pointer-events-none">
+                       <Sparkles size={64} className="text-indigo-500" />
                     </div>
-                    <p className="text-xs text-indigo-700 font-medium leading-relaxed">
-                       {priceInsight.reason} Typically sells for <span className="font-bold">{priceInsight.estimatedRange}</span>.
-                    </p>
+                    
+                    <div className="bg-white p-2.5 rounded-xl shadow-sm text-indigo-600 shrink-0">
+                       <TrendingUp size={24} />
+                    </div>
+                    <div className="flex-1 relative z-10">
+                       <div className="flex justify-between items-center mb-1">
+                          <h4 className="font-bold text-indigo-900 text-sm">Market Insight</h4>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${priceInsight.verdict === 'Great Deal' ? 'bg-green-100 text-green-700' : priceInsight.verdict === 'Overpriced' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                             {priceInsight.verdict}
+                          </span>
+                       </div>
+                       <p className="text-xs text-indigo-700 font-medium leading-relaxed">
+                          {priceInsight.reason} Typically sells for <span className="font-bold">{priceInsight.estimatedRange}</span>.
+                       </p>
+                    </div>
                  </div>
-              </div>
-            )}
+               )}
+
+               {ecoImpact && (
+                 <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-4 border border-emerald-100 flex flex-col animate-fade-in relative overflow-hidden">
+                    <div className="flex items-start gap-4 z-10 relative">
+                       <div className="bg-white p-2.5 rounded-xl shadow-sm text-emerald-600 shrink-0">
+                          <Leaf size={24} />
+                       </div>
+                       <div className="flex-1">
+                          <h4 className="font-bold text-emerald-900 text-sm mb-1">Environmental Impact</h4>
+                          <p className="text-xs text-emerald-700 font-medium leading-relaxed mb-3">
+                             {ecoImpact.fact}
+                          </p>
+                          <div className="flex gap-4">
+                             <div className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-lg">
+                                <Leaf size={14} className="text-green-600" />
+                                <span className="text-xs font-bold text-green-800">{ecoImpact.co2Saved} CO₂</span>
+                             </div>
+                             <div className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-lg">
+                                <Droplets size={14} className="text-blue-500" />
+                                <span className="text-xs font-bold text-blue-800">{ecoImpact.waterSaved} Water</span>
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+               )}
+            </div>
 
             <div className="flex gap-2">
                <div className="bg-slate-100 px-4 py-2 rounded-xl text-xs font-bold text-slate-600 uppercase tracking-wider">{item.category}</div>
-               <div className="bg-green-50 px-4 py-2 rounded-xl text-xs font-bold text-green-700 uppercase tracking-wider">Good Condition</div>
+               {item.type === 'SHARE' && (
+                 <div className="bg-emerald-50 px-4 py-2 rounded-xl text-xs font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
+                    <Leaf size={12} /> Community Share
+                 </div>
+               )}
             </div>
 
             {/* Seller Card */}
@@ -367,7 +433,7 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
 
             <div className="space-y-3">
                <h3 className="font-bold text-slate-900 text-lg">Description</h3>
-               <p className="text-slate-600 leading-relaxed">{item.description}</p>
+               <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{item.description}</p>
             </div>
 
             <SafetyMap collegeName={item.college} />
@@ -408,12 +474,12 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
                    : 'bg-slate-900 text-white hover:scale-[1.02] active:scale-95'
                }`}
              >
-               {isSold 
-                 ? 'Item Sold' 
-                 : item.type === 'SALE' ? 'Buy Now' 
-                 : item.type === 'RENT' ? 'Rent' 
-                 : item.type === 'SERVICE' ? 'Book' 
-                 : 'Action'}
+               {isSold ? 'Item Sold' : (
+                 <>
+                   {getActionIcon()}
+                   {getActionLabel()}
+                 </>
+               )}
              </button>
           </div>
         </div>
