@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { Item, Category, UserProfile, Notification, Conversation, Message, Review, Report, Transaction, Booking, SwapProposal, BankAccount, College } from '../types';
+import { Item, Category, UserProfile, AppNotification, Conversation, Message, Review, Report, Transaction, Booking, SwapProposal, BankAccount, College } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 const parseImages = (imageField: any): string[] => {
@@ -495,7 +495,7 @@ export const api = {
 
   // --- NOTIFICATIONS & SAVED ---
 
-  subscribeToNotifications: (userId: string, callback: (n: Notification) => void) => {
+  subscribeToNotifications: (userId: string, callback: (n: AppNotification) => void) => {
     return supabase.channel(`notifications:${userId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` }, 
       (payload) => {
@@ -512,7 +512,7 @@ export const api = {
       }).subscribe();
   },
 
-  getNotifications: async (userId: string): Promise<Notification[]> => {
+  getNotifications: async (userId: string): Promise<AppNotification[]> => {
     const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
     if (error) return [];
     return data.map((n: any) => ({

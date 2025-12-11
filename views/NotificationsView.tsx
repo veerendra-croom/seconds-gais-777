@@ -1,16 +1,17 @@
+
 import React, { useEffect, useState } from 'react';
-import { Notification } from '../types';
+import { AppNotification } from '../types';
 import { api } from '../services/api';
 import { Bell, CheckCircle2, ChevronLeft, MessageCircle, Package, AlertCircle, Calendar } from 'lucide-react';
 
 interface NotificationsViewProps {
   userId: string;
   onBack: () => void;
-  onNotificationClick: (n: Notification) => void;
+  onNotificationClick: (n: AppNotification) => void;
 }
 
 export const NotificationsView: React.FC<NotificationsViewProps> = ({ userId, onBack, onNotificationClick }) => {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,7 +46,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ userId, on
     const today = new Date().toDateString();
     const yesterday = new Date(Date.now() - 86400000).toDateString();
     
-    const groups: Record<string, Notification[]> = {
+    const groups: Record<string, AppNotification[]> = {
       'Today': [],
       'Yesterday': [],
       'Earlier': []

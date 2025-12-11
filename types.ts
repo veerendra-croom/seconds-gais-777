@@ -167,7 +167,7 @@ export interface Report {
   item?: Partial<Item>; // Joined data for Admin UI
 }
 
-export interface Notification {
+export interface AppNotification {
   id: string;
   userId: string;
   type: 'MESSAGE' | 'ORDER' | 'SYSTEM' | 'ALERT';

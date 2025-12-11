@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { ModuleType, Item, UserProfile, Notification } from '../types';
+import { ModuleType, Item, UserProfile, AppNotification } from '../types';
 import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone, BellRing } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
@@ -13,7 +13,7 @@ interface HomeProps {
   onModuleSelect: (module: ModuleType, params?: any) => void;
   onItemClick?: (item: Item) => void;
   onSearch: (query: string) => void;
-  onNotificationClick?: (notification: Notification) => void;
+  onNotificationClick?: (notification: AppNotification) => void;
 }
 
 const allModules = [
@@ -41,7 +41,7 @@ function urlBase64ToUint8Array(base64String: string) {
 export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch, onNotificationClick }) => {
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showSustainability, setShowSustainability] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [analyzingImage, setAnalyzingImage] = useState(false);

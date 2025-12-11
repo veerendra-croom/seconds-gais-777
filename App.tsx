@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './services/supabaseClient';
 import { api } from './services/api';
-import { UserProfile, Item, Conversation, ModuleType, Notification } from './types';
+import { UserProfile, Item, Conversation, ModuleType, AppNotification } from './types';
 import { ToastProvider, useToast } from './components/Toast';
 import { Navigation } from './components/Navigation';
 import { SplashView } from './views/SplashView';
@@ -190,7 +190,7 @@ const AppContent: React.FC = () => {
     }
   };
 
-  const handleNotificationClick = (n: Notification) => {
+  const handleNotificationClick = (n: AppNotification) => {
     if (n.link === 'CHAT_LIST') {
       setCurrentView('CHAT_LIST');
     } else if (n.link === 'MY_ORDERS') {
