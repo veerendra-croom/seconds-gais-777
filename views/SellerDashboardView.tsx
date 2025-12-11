@@ -33,12 +33,12 @@ export const SellerDashboardView: React.FC<SellerDashboardViewProps> = ({ user, 
 
       // Real Analytics Calculation
       let totalViews = 0;
-      // Likes not explicitly in Item type from getUserItems usually, but assume 0 if not present
-      const totalLikes = 0; 
       const sales = userItems.filter(i => i.status === 'SOLD').length;
       const active = userItems.filter(i => i.status === 'ACTIVE').length;
 
-      // In real app, views would come from DB. Since we added 'views' to type but maybe not DB, handle gracefully.
+      // Calculate Total Likes using new API
+      const totalLikes = await api.getSellerTotalLikes(user.id);
+
       userItems.forEach(item => {
          totalViews += item.views || 0;
       });
@@ -149,9 +149,9 @@ export const SellerDashboardView: React.FC<SellerDashboardViewProps> = ({ user, 
               color={{ bg: 'bg-blue-50', text: 'text-blue-600' }} 
             />
             <StatCard 
-              label="Total Views" 
-              value={stats.views} 
-              icon={Eye} 
+              label="Wishlisted" 
+              value={stats.likes} 
+              icon={Heart} 
               color={{ bg: 'bg-purple-50', text: 'text-purple-600' }}
             />
             <StatCard 

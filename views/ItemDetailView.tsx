@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { Item, UserProfile, Review, Badge } from '../types';
 import { api } from '../services/api';
 import { analyzePrice, analyzeSustainability } from '../services/geminiService';
-import { ChevronLeft, Share2, Heart, MapPin, ShieldCheck, MessageCircle, ShoppingBag, Calendar, AlertTriangle, User, ChevronRight, Repeat, Flag, Star, HandHeart, AlertCircle, TrendingUp, Sparkles, Clock, Leaf, Droplets } from 'lucide-react';
+import { ChevronLeft, Share2, Heart, MapPin, ShieldCheck, MessageCircle, ShoppingBag, Calendar, AlertTriangle, User, ChevronRight, Repeat, Flag, Star, HandHeart, AlertCircle, TrendingUp, Sparkles, Clock, Leaf, Droplets, ExternalLink } from 'lucide-react';
 import { BookingModal } from '../components/BookingModal';
 import { PurchaseModal } from '../components/PurchaseModal';
 import { SwapModal } from '../components/SwapModal';
@@ -34,7 +35,7 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
   const { showToast } = useToast();
   
   // AI Insights State
-  const [priceInsight, setPriceInsight] = useState<{ verdict: string, estimatedRange: string, reason: string } | null>(null);
+  const [priceInsight, setPriceInsight] = useState<{ verdict: string, estimatedRange: string, reason: string, sources?: { title: string, uri: string }[] } | null>(null);
   const [ecoImpact, setEcoImpact] = useState<{ co2Saved: string, waterSaved: string, fact: string } | null>(null);
   
   const [showBooking, setShowBooking] = useState(false);
@@ -331,25 +332,47 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ item, currentUse
             {/* AI Insights & Eco-Impact */}
             <div className="grid grid-cols-1 gap-4">
                {priceInsight && !isOwnItem && item.type === 'SALE' && (
-                 <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-2xl p-4 border border-indigo-100 flex items-start gap-4 animate-fade-in relative overflow-hidden">
+                 <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-2xl p-4 border border-indigo-100 flex flex-col gap-4 animate-fade-in relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-3 opacity-10 pointer-events-none">
                        <Sparkles size={64} className="text-indigo-500" />
                     </div>
                     
-                    <div className="bg-white p-2.5 rounded-xl shadow-sm text-indigo-600 shrink-0">
-                       <TrendingUp size={24} />
-                    </div>
-                    <div className="flex-1 relative z-10">
-                       <div className="flex justify-between items-center mb-1">
-                          <h4 className="font-bold text-indigo-900 text-sm">Market Insight</h4>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${priceInsight.verdict === 'Great Deal' ? 'bg-green-100 text-green-700' : priceInsight.verdict === 'Overpriced' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                             {priceInsight.verdict}
-                          </span>
+                    <div className="flex items-start gap-4 z-10 relative">
+                       <div className="bg-white p-2.5 rounded-xl shadow-sm text-indigo-600 shrink-0">
+                          <TrendingUp size={24} />
                        </div>
-                       <p className="text-xs text-indigo-700 font-medium leading-relaxed">
-                          {priceInsight.reason} Typically sells for <span className="font-bold">{priceInsight.estimatedRange}</span>.
-                       </p>
+                       <div className="flex-1 relative z-10">
+                          <div className="flex justify-between items-center mb-1">
+                             <h4 className="font-bold text-indigo-900 text-sm">Market Insight</h4>
+                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${priceInsight.verdict === 'Great Deal' ? 'bg-green-100 text-green-700' : priceInsight.verdict === 'Overpriced' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                                {priceInsight.verdict}
+                             </span>
+                          </div>
+                          <p className="text-xs text-indigo-700 font-medium leading-relaxed">
+                             {priceInsight.reason} Typically sells for <span className="font-bold">{priceInsight.estimatedRange}</span>.
+                          </p>
+                       </div>
                     </div>
+
+                    {/* Grounding Sources */}
+                    {priceInsight.sources && priceInsight.sources.length > 0 && (
+                       <div className="bg-white/60 p-3 rounded-xl border border-indigo-100 relative z-10">
+                          <p className="text-[10px] font-bold text-indigo-400 uppercase mb-2">Sources</p>
+                          <div className="space-y-1">
+                             {priceInsight.sources.map((source, i) => (
+                                <a 
+                                  key={i} 
+                                  href={source.uri} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 text-xs text-indigo-800 hover:text-indigo-600 hover:underline truncate"
+                                >
+                                   <ExternalLink size={10} /> {source.title}
+                                </a>
+                             ))}
+                          </div>
+                       </div>
+                    )}
                  </div>
                )}
 

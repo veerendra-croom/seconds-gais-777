@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { api } from '../services/api';
@@ -309,7 +308,7 @@ const AppContent: React.FC = () => {
 
     if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} onSwitchToApp={() => changeView('HOME')} />;
     
-    if (maintenanceMode && userProfile.role !== 'ADMIN') {
+    if (maintenanceMode && (userProfile.role as string) !== 'ADMIN') {
        return (
          <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
             <div className="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center mb-8">

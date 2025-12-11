@@ -229,7 +229,7 @@ const AppContent: React.FC = () => {
     if (!userProfile) return <SplashView />;
 
     // Authenticated Views
-    if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} />;
+    if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} onSwitchToApp={() => setCurrentView('HOME')} />;
     if (currentView === 'COLLEGE_LINK') return <CollegeLinkView userId={userProfile.id} onSuccess={() => setCurrentView('HOME')} />;
 
     switch (currentView) {
@@ -252,7 +252,7 @@ const AppContent: React.FC = () => {
       case 'SWAP':
       case 'EARN':
       case 'REQUEST':
-        return <Marketplace type={currentView} onBack={() => setCurrentView('HOME')} onItemClick={handleItemClick} initialSearchQuery={globalSearchQuery} />;
+        return <Marketplace type={currentView} onBack={() => setCurrentView('HOME')} onItemClick={handleItemClick} initialSearchQuery={globalSearchQuery} user={userProfile} />;
       default: return <Home user={userProfile} onModuleSelect={setCurrentView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
     }
   };

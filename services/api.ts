@@ -243,6 +243,8 @@ export const api = {
   },
 
   getTrendingItems: async (): Promise<Item[]> => {
+    // In a real app with 'views' column, we would order by views.
+    // For now, we fetch the most recent items as 'Trending'.
     return await api.getItems('BUY', 'All', undefined, undefined, 0, 4);
   },
 
@@ -306,6 +308,16 @@ export const api = {
        verified: false,
        status: item.status
     }));
+  },
+
+  getSellerTotalLikes: async (userId: string): Promise<number> => {
+    // Count how many times this seller's items have been saved by others
+    const { count, error } = await supabase
+      .from('saved_items')
+      .select('id, items!inner(seller_id)', { count: 'exact', head: true })
+      .eq('items.seller_id', userId);
+    
+    return count || 0;
   },
 
   createItem: async (itemData: any, userId: string, college: string): Promise<Item | null> => {
@@ -1081,7 +1093,7 @@ export const api = {
         reason: r.reason,
         status: r.status,
         createdAt: r.created_at,
-        item: r.item ? { id: r.item.id, title: r.item.title } : undefined
+        item: r.item ? ({ id: r.item.id, title: r.item.title } as Item) : undefined
      }));
   },
 
@@ -1183,12 +1195,25 @@ export const api = {
   },
 
   withdrawFunds: async (userId: string, amount: number): Promise<void> => {
-     // 1. Deduct locally
-     const { error } = await supabase.rpc('withdraw_funds', { p_user_id: userId, p_amount: amount });
-     if (error) throw error;
+     // 1. Attempt Payout FIRST to ensure funds can actually be transferred
+     const { error: payoutError } = await supabase.functions.invoke('payout-user', {
+        body: { userId, amount: Math.round(amount * 100) }
+     });
 
-     // 2. Trigger Stripe Payout via Edge Function
-     await api.invokeFunction('payout-user', { userId, amount: Math.round(amount * 100) });
+     if (payoutError) {
+        // If payout fails, do NOT deduct balance
+        console.error("Payout failed:", payoutError);
+        throw new Error("Payout service unavailable. Balance not deducted.");
+     }
+
+     // 2. Only if payout succeeds, deduct from DB
+     const { error } = await supabase.rpc('withdraw_funds', { p_user_id: userId, p_amount: amount });
+     
+     if (error) {
+        // Critical: Payout succeeded but DB deduction failed. Log this for manual reconciliation.
+        console.error("CRITICAL: Payout succeeded but DB deduction failed!", error);
+        throw error;
+     }
   },
 
   deleteAccount: async (userId: string): Promise<void> => {

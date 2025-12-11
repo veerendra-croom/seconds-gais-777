@@ -26,6 +26,18 @@ const allModules = [
   { id: 'REQUEST', label: 'Request', icon: HandHeart, color: 'bg-indigo-500', gradient: 'from-indigo-400 to-indigo-600' },
 ];
 
+// Helper to convert VAPID key
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch, onNotificationClick }) => {
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +53,7 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
   
   // Notification State
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
@@ -117,21 +130,43 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
   const handleEnableNotifications = async () => {
     if (!('Notification' in window)) return;
     
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-       setShowNotificationPrompt(false);
-       showToast("Notifications enabled!", 'success');
-       
-       // Register Subscription via Service Worker
-       if ('serviceWorker' in navigator) {
-          const registration = await navigator.serviceWorker.ready;
-          // In real app, convert VAPID key: urlBase64ToUint8Array(publicVapidKey)
-          // const sub = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: ... });
-          // await api.registerPushDevice(user.id, sub);
-          console.log("Push registered (mock)");
-       }
-    } else {
-       setShowNotificationPrompt(false);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+         setPushLoading(true);
+         setShowNotificationPrompt(false);
+         
+         // Register Subscription via Service Worker
+         if ('serviceWorker' in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            
+            // NOTE: In a production environment, this key should come from an environment variable or API config endpoint.
+            // Using a placeholder public key here. If this fails, it means the key is invalid for the push service.
+            const vapidPublicKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nkx8Wk'; 
+            
+            try {
+              const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey);
+              const subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: convertedVapidKey
+              });
+              
+              await api.registerPushDevice(user.id, subscription);
+              showToast("Notifications enabled!", 'success');
+            } catch (err) {
+              console.warn("Push subscription failed (Check VAPID Key)", err);
+              // Fallback: Just confirm permission granted locally
+              showToast("Notifications allowed (Local)", 'success');
+            }
+         }
+      } else {
+         setShowNotificationPrompt(false);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Could not enable notifications", 'error');
+    } finally {
+      setPushLoading(false);
     }
   };
 
@@ -139,9 +174,6 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     if (!installPrompt) return;
     installPrompt.prompt();
     installPrompt.userChoice.then((choiceResult: any) => {
-      if (choiceResult.outcome === 'accepted') {
-        console.log('User accepted the install prompt');
-      }
       setInstallPrompt(null);
     });
   };
@@ -151,7 +183,7 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
     if (searchQuery.trim()) {
       const newHistory = [searchQuery, ...recentSearches.filter(q => q !== searchQuery)].slice(0, 5);
       localStorage.setItem('recent_searches', JSON.stringify(newHistory));
-      setRecentSearches(newHistory); // Update state immediately
+      setRecentSearches(newHistory);
       onSearch(searchQuery);
     }
   };
@@ -232,7 +264,7 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
            </div>
            <p className="mt-8 text-white text-xl font-bold tracking-wide animate-bounce">Listening...</p>
            <button 
-             onClick={() => window.location.reload()} // Quick way to stop if stuck, or implement proper stop
+             onClick={() => window.location.reload()} 
              className="mt-8 px-6 py-2 bg-white/20 rounded-full text-white text-sm hover:bg-white/30 transition-colors"
            >
              Cancel
@@ -281,7 +313,9 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
               </div>
               <div className="flex gap-2">
                  <button onClick={() => setShowNotificationPrompt(false)} className="text-xs font-bold text-slate-400 hover:text-white p-2">Later</button>
-                 <button onClick={handleEnableNotifications} className="bg-white text-slate-900 px-4 py-2 rounded-xl text-xs font-bold shadow-lg hover:bg-slate-200">Enable</button>
+                 <button onClick={handleEnableNotifications} disabled={pushLoading} className="bg-white text-slate-900 px-4 py-2 rounded-xl text-xs font-bold shadow-lg hover:bg-slate-200 flex items-center gap-2">
+                    {pushLoading && <Loader2 size={12} className="animate-spin" />} Enable
+                 </button>
               </div>
            </div>
         )}

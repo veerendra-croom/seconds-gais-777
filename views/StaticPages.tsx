@@ -31,25 +31,29 @@ export const StaticPages: React.FC<StaticPagesProps> = ({ type, onBack, user }) 
     e.preventDefault();
     setLoading(true);
     
-    if (user) {
-      try {
+    try {
+      if (user) {
+        // Authenticated users send a report ticket
         await api.createReport({
           reporterId: user.id,
           itemId: 'SUPPORT_TICKET', // Using reserved ID for support tickets
           reason: `[CONTACT_FORM] From: ${contactForm.name} (${contactForm.email}) - Message: ${contactForm.message}`
         });
-        setSent(true);
-      } catch (err) {
-        console.error(err);
-        showToast("Failed to send message. Please try again.", 'error');
-      } finally {
-        setLoading(false);
+      } else {
+        // Unauthenticated users trigger an email alert via Edge Function
+        // Note: 'admin@seconds.app' is a placeholder destination. In production, this would be your support alias.
+        await api.invokeFunction('send-email', {
+           email: 'admin@seconds.app', 
+           type: 'ALERT',
+           message: `New Guest Inquiry from ${contactForm.name} (${contactForm.email}): ${contactForm.message}`
+        });
       }
-    } else {
-      setTimeout(() => {
-        setLoading(false);
-        setSent(true);
-      }, 1500);
+      setSent(true);
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to send message. Please try again.", 'error');
+    } finally {
+      setLoading(false);
     }
   };
 

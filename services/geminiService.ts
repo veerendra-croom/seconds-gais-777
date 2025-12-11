@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize the Gemini API client
@@ -14,10 +15,6 @@ export const generateItemDescription = async (
   details: string
 ): Promise<string> => {
   try {
-    if (!process.env.API_KEY) {
-      return "AI description generation requires a valid API Key. (Demo Mode: Please enter details manually)";
-    }
-
     const model = 'gemini-2.5-flash';
     const prompt = `
       You are an expert copywriter for a student marketplace app called "Seconds-App".
@@ -36,10 +33,11 @@ export const generateItemDescription = async (
       contents: prompt,
     });
 
-    return response.text || "Could not generate description.";
+    return response.text || "";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "Error generating description. Please try again.";
+    // Return empty string on failure to let user fill manually
+    return "";
   }
 };
 
@@ -48,8 +46,6 @@ export const generateItemDescription = async (
  */
 export const suggestPrice = async (itemTitle: string): Promise<string> => {
    try {
-    if (!process.env.API_KEY) return "N/A";
-
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Find the current used market price for "${itemTitle}" in USD. Return ONLY a single number representing a fair selling price for a quick student-to-student sale (e.g. 45). Do not output text.`,
@@ -61,20 +57,17 @@ export const suggestPrice = async (itemTitle: string): Promise<string> => {
     // Extract number from potentially chatty response
     const text = response.text || "";
     const match = text.match(/\d+/);
-    return match ? match[0] : "N/A";
+    return match ? match[0] : "";
    } catch (e) {
-     return "N/A";
+     return "";
    }
 }
 
 /**
  * Parses natural language search queries into structured filters.
- * e.g. "cheap macbook under 500" -> { searchQuery: "macbook", maxPrice: 500, sortBy: "PRICE_ASC" }
  */
 export const parseSearchQuery = async (query: string): Promise<any> => {
   try {
-    if (!process.env.API_KEY) return null;
-
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `
@@ -108,8 +101,6 @@ export const parseSearchQuery = async (query: string): Promise<any> => {
  */
 export const checkImageSafety = async (file: File): Promise<boolean> => {
   try {
-    if (!process.env.API_KEY) return true; // Fail open for demo
-
     const base64Data = await new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -129,6 +120,9 @@ export const checkImageSafety = async (file: File): Promise<boolean> => {
     const text = response.text?.trim().toUpperCase() || "YES";
     return !text.includes("NO");
   } catch (e) {
+    // If API fails, default to allowing upload but logging error (fail open for UX in this specific demo context, 
+    // but typically would fail closed in strict environments)
+    console.warn("Safety check failed, skipping", e);
     return true; 
   }
 }
@@ -138,8 +132,6 @@ export const checkImageSafety = async (file: File): Promise<boolean> => {
  */
 export const analyzeImageForSearch = async (file: File): Promise<string> => {
   try {
-    if (!process.env.API_KEY) return "";
-
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -170,8 +162,6 @@ export const analyzeImageForSearch = async (file: File): Promise<string> => {
  */
 export const analyzeImageForListing = async (file: File): Promise<any> => {
   try {
-    if (!process.env.API_KEY) return null;
-
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
@@ -218,8 +208,6 @@ export const analyzeImageForListing = async (file: File): Promise<any> => {
  */
 export const analyzeAudioForListing = async (audioBlob: Blob): Promise<any> => {
   try {
-    if (!process.env.API_KEY) return null;
-
     const reader = new FileReader();
     const base64Promise = new Promise<string>((resolve) => {
       reader.onloadend = () => {
@@ -270,9 +258,7 @@ export const generateSmartReplies = async (
   itemContext?: string
 ): Promise<string[]> => {
   try {
-    if (!process.env.API_KEY || lastMessages.length === 0) {
-      return ["Is this available?", "Interested!", "Can we meet?"];
-    }
+    if (lastMessages.length === 0) return [];
 
     const contextStr = lastMessages.map(m => `${m.sender}: ${m.content}`).join('\n');
     
@@ -294,19 +280,17 @@ export const generateSmartReplies = async (
 
     const text = response.text?.trim() || "";
     const replies = text.split('|').map(s => s.trim()).filter(s => s.length > 0);
-    return replies.length >= 1 ? replies.slice(0, 3) : ["Is this available?", "Interested!", "Can we meet?"];
+    return replies.length >= 1 ? replies.slice(0, 3) : [];
   } catch (e) {
-    return ["Is this available?", "Interested!", "Can we meet?"];
+    return [];
   }
 };
 
 /**
  * Analyzes market price for an item description using Search Grounding.
  */
-export const analyzePrice = async (title: string, price: number): Promise<{ verdict: string, estimatedRange: string, reason: string }> => {
+export const analyzePrice = async (title: string, price: number): Promise<{ verdict: string, estimatedRange: string, reason: string, sources?: { title: string, uri: string }[] } | null> => {
   try {
-    if (!process.env.API_KEY) return { verdict: 'Unknown', estimatedRange: '$-', reason: 'AI unavailable' };
-
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `
@@ -324,15 +308,28 @@ export const analyzePrice = async (title: string, price: number): Promise<{ verd
       }
     });
 
-    // Simple JSON extraction
     const text = response.text?.trim();
     const jsonMatch = text?.match(/\{[\s\S]*\}/);
+    let result = null;
+    
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      result = JSON.parse(jsonMatch[0]);
     }
-    return { verdict: 'Fair Price', estimatedRange: 'Unknown', reason: 'Could not analyze market data.' };
+
+    // Extract sources from Grounding Metadata
+    if (result && response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
+       const sources = response.candidates[0].groundingMetadata.groundingChunks
+         .map((c: any) => c.web)
+         .filter((w: any) => w && w.uri && w.title);
+       
+       if (sources.length > 0) {
+         result.sources = sources;
+       }
+    }
+
+    return result;
   } catch (e) {
-    return { verdict: 'Unknown', estimatedRange: '$-', reason: 'Analysis failed.' };
+    return null;
   }
 };
 
@@ -341,14 +338,6 @@ export const analyzePrice = async (title: string, price: number): Promise<{ verd
  */
 export const getSafeMeetingSpots = async (collegeName: string): Promise<{ id: number, name: string, type: string }[]> => {
   try {
-    if (!process.env.API_KEY) {
-      return [
-        { id: 1, name: "Student Union (Lobby)", type: "Public" },
-        { id: 2, name: "Main Library (Front Desk)", type: "Quiet" },
-        { id: 3, name: "Campus Police Station", type: "Safe Zone" }
-      ];
-    }
-
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `
@@ -361,28 +350,21 @@ export const getSafeMeetingSpots = async (collegeName: string): Promise<{ id: nu
     });
 
     const text = response.text?.trim() || "";
-    // Clean up markdown if present
     const cleanText = text.replace(/```json|```/g, '').trim();
     
     const spots = JSON.parse(cleanText);
     return spots.map((s: any, i: number) => ({ id: i + 1, name: s.name, type: s.type }));
   } catch (e) {
     console.error("Failed to get safe spots", e);
-    return [
-        { id: 1, name: "Student Union (Lobby)", type: "Public" },
-        { id: 2, name: "Main Library (Front Desk)", type: "Quiet" },
-        { id: 3, name: "Campus Police Station", type: "Safe Zone" }
-    ];
+    return [];
   }
 };
 
 /**
  * Calculates sustainability impact of a used item.
  */
-export const analyzeSustainability = async (itemTitle: string, category: string): Promise<{ co2Saved: string, waterSaved: string, fact: string }> => {
+export const analyzeSustainability = async (itemTitle: string, category: string): Promise<{ co2Saved: string, waterSaved: string, fact: string } | null> => {
   try {
-    if (!process.env.API_KEY) return { co2Saved: '5kg', waterSaved: '100L', fact: 'Reuse reduces waste.' };
-
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `
@@ -400,7 +382,7 @@ export const analyzeSustainability = async (itemTitle: string, category: string)
     const cleanText = text.replace(/```json|```/g, '').trim();
     return JSON.parse(cleanText);
   } catch (e) {
-    return { co2Saved: '5kg', waterSaved: '100L', fact: 'Buying used extends product life cycles.' };
+    return null;
   }
 };
 
@@ -409,7 +391,7 @@ export const analyzeSustainability = async (itemTitle: string, category: string)
  */
 export const generateSellerTips = async (itemTitles: string[]): Promise<string[]> => {
   try {
-    if (!process.env.API_KEY || itemTitles.length === 0) return ["Add more photos to attract buyers.", "Share your listing on social media.", "Lower the price slightly to sell faster."];
+    if (itemTitles.length === 0) return [];
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -425,6 +407,6 @@ export const generateSellerTips = async (itemTitles: string[]): Promise<string[]
     const cleanText = text.replace(/```json|```/g, '').trim();
     return JSON.parse(cleanText);
   } catch (e) {
-    return ["Add more photos to attract buyers.", "Share your listing on social media.", "Lower the price slightly to sell faster."];
+    return [];
   }
 };

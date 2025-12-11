@@ -477,7 +477,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onSwitchTo
   const handleBulkBan = async () => {
     if (!confirm(`Ban ${selectedUserIds.size} users?`)) return;
     try {
-      await Promise.all(Array.from(selectedUserIds).map(id => api.adminBanUser(id, true)));
+      await Promise.all(Array.from(selectedUserIds).map((id) => api.adminBanUser(id as string, true)));
       showToast("Bulk ban complete", 'success');
       setSelectedUserIds(new Set());
       loadData();
