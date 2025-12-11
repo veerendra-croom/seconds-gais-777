@@ -2,6 +2,7 @@
 import React from 'react';
 import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut, PanelLeftClose, PanelLeftOpen, LayoutDashboard } from 'lucide-react';
 import { ModuleType } from '../types';
+import { signOut } from '../services/supabaseClient';
 
 interface NavigationProps {
   currentView: ModuleType;
@@ -136,7 +137,10 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, is
         </nav>
 
         <div className="p-4 border-t border-slate-50">
-          <button className="w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors group font-medium">
+          <button 
+            onClick={signOut}
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors group font-medium"
+          >
             <LogOut size={20} className="text-slate-400 group-hover:text-red-500 transition-colors" />
             <span>Log Out</span>
           </button>
