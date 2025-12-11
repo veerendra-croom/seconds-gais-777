@@ -1093,7 +1093,7 @@ export const api = {
         reason: r.reason,
         status: r.status,
         createdAt: r.created_at,
-        item: r.item ? ({ id: r.item.id, title: r.item.title } as Item) : undefined
+        item: r.item ? { id: r.item.id, title: r.item.title } : undefined
      }));
   },
 

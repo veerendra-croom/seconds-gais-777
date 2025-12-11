@@ -131,7 +131,7 @@ const UserDetailModal: React.FC<{ userId: string, onClose: () => void }> = ({ us
                 </div>
                 
                 <div className="space-y-4 text-sm">
-                   <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Joined</span> <span className="font-medium">{new Date(data.profile.created_at as string).toLocaleDateString()}</p></div>
+                   <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Joined</span> <span className="font-medium">{new Date(data.profile.created_at as string).toLocaleDateString()}</span></div>
                    <div className="flex justify-between border-b pb-2"><span className="text-slate-500">College</span> <span className="font-medium">{data.profile.college}</span></div>
                    <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Balance</span> <span className="font-medium">${data.profile.earnings}</span></div>
                    <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Impact</span> <span className="font-medium">{data.profile.savings} pts</span></div>

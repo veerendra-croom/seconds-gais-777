@@ -164,7 +164,7 @@ export interface Report {
   reason: string;
   status: 'PENDING' | 'RESOLVED' | 'DISMISSED';
   createdAt: string;
-  item?: Item; // Joined data for Admin UI
+  item?: Partial<Item>; // Joined data for Admin UI
 }
 
 export interface Notification {
