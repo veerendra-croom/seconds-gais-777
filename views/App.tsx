@@ -126,6 +126,16 @@ const AppContent: React.FC = () => {
     window.scrollTo(0, 0);
   }, [currentView]);
 
+  // Check Tour Status when User Profile Loads
+  useEffect(() => {
+    if (userProfile) {
+      const hasSeenTour = localStorage.getItem(`tour_seen_${userProfile.id}`);
+      if (!hasSeenTour) {
+        setShowTour(true);
+      }
+    }
+  }, [userProfile]);
+
   const changeView = (view: ModuleType, pushToHistory = true) => {
     setCurrentView(view);
   };
@@ -143,10 +153,6 @@ const AppContent: React.FC = () => {
         } else {
            changeView('HOME');
         }
-        
-        // Check for onboarding
-        const hasSeenTour = localStorage.getItem(`tour_seen_${userId}`);
-        if (!hasSeenTour) setShowTour(true);
       }
     } catch (e) {
       console.error("Error fetching profile", e);
@@ -156,8 +162,10 @@ const AppContent: React.FC = () => {
   };
 
   const handleTourComplete = () => {
-    setShowTour(false);
-    if (userProfile) localStorage.setItem(`tour_seen_${userProfile.id}`, 'true');
+    if (userProfile) {
+      localStorage.setItem(`tour_seen_${userProfile.id}`, 'true');
+      setShowTour(false);
+    }
   };
 
   const handleItemClick = (item: Item) => {
