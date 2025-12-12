@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut, PanelLeftClose, PanelLeftOpen, LayoutDashboard } from 'lucide-react';
+import { Home, ShoppingBag, PlusCircle, User, MessageCircle, LogOut, PanelLeftClose, PanelLeftOpen, LayoutDashboard, Globe, Users } from 'lucide-react';
 import { ModuleType } from '../types';
 import { signOut } from '../services/supabaseClient';
 
@@ -15,7 +15,8 @@ interface NavigationProps {
 export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, isSidebarOpen, setIsSidebarOpen, userRole }) => {
   const navItems = [
     { id: 'HOME', icon: Home, label: 'Home' },
-    { id: 'BUY', icon: ShoppingBag, label: 'Shop', activeMatch: ['BUY', 'RENT', 'SHARE', 'SWAP', 'EARN', 'ITEM_DETAIL'] },
+    { id: 'BUY', icon: ShoppingBag, label: 'Market', activeMatch: ['BUY', 'RENT', 'SWAP', 'ITEM_DETAIL'] },
+    { id: 'COMMUNITY', icon: Users, label: 'Community', activeMatch: ['COMMUNITY', 'SHARE', 'REQUEST', 'EARN'] },
     { id: 'SELL', icon: PlusCircle, label: 'Post', highlight: true },
     { id: 'CHAT_LIST', icon: MessageCircle, label: 'Chat', activeMatch: ['CHAT_LIST', 'CHAT_ROOM'] }, 
     { id: 'PROFILE', icon: User, label: 'Profile' },

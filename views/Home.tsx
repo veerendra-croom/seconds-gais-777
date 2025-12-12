@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { ModuleType, Item, UserProfile, AppNotification } from '../types';
-import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone, BellRing } from 'lucide-react';
+import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone, BellRing, ChevronLeft } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
 import { analyzeImageForSearch } from '../services/geminiService';
@@ -14,6 +14,7 @@ interface HomeProps {
   onItemClick?: (item: Item) => void;
   onSearch: (query: string) => void;
   onNotificationClick?: (notification: AppNotification) => void;
+  onBack?: () => void;
 }
 
 const allModules = [
@@ -38,7 +39,7 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch, onNotificationClick }) => {
+export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, onSearch, onNotificationClick, onBack }) => {
   const [trendingItems, setTrendingItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -282,14 +283,21 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
       {/* Premium Header */}
       <header className={`px-6 pt-12 pb-4 ${appBanner ? 'md:pt-4' : 'sticky top-0 md:static'} z-30 transition-all`}>
         <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tighter">
-              Hello, {user.name?.split(' ')[0]} <span className="inline-block animate-wave origin-bottom-right">👋</span>
-            </h1>
-            <p className="text-sm text-slate-500 font-medium flex items-center mt-1">
-              <span className="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span>
-              {user.college}
-            </p>
+          <div className="flex items-center gap-3">
+            {onBack && (
+              <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100 transition-colors text-slate-600">
+                <ChevronLeft size={24} />
+              </button>
+            )}
+            <div>
+              <h1 className="text-3xl font-black text-slate-900 tracking-tighter">
+                Hello, {user.name?.split(' ')[0]} <span className="inline-block animate-wave origin-bottom-right">👋</span>
+              </h1>
+              <p className="text-sm text-slate-500 font-medium flex items-center mt-1">
+                <span className="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span>
+                {user.college}
+              </p>
+            </div>
           </div>
           
           <button 

@@ -1,5 +1,5 @@
 
-export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'ORDER_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'NOTIFICATIONS' | 'QR_SCANNER' | 'SELLER_DASHBOARD' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS';
+export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'COMMUNITY' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'ORDER_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'NOTIFICATIONS' | 'QR_SCANNER' | 'SELLER_DASHBOARD' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS' | 'HELP_CENTER' | 'ACTIVITY_LOG' | 'NOT_FOUND' | 'SECURITY_SETTINGS' | 'DATA_PRIVACY' | 'SETUP_WIZARD';
 
 export enum Category {
   ELECTRONICS = 'Electronics',
@@ -19,6 +19,15 @@ export interface College {
   longitude: number;
 }
 
+export interface Bid {
+  id: string;
+  itemId: string;
+  bidderId: string;
+  bidderName: string;
+  amount: number;
+  createdAt: string;
+}
+
 export interface Item {
   id: string;
   title: string;
@@ -27,7 +36,7 @@ export interface Item {
   image: string; // Primary thumbnail
   images: string[]; // Gallery
   category: Category;
-  type: 'SALE' | 'RENT' | 'SHARE' | 'SWAP' | 'SERVICE' | 'REQUEST';
+  type: 'SALE' | 'RENT' | 'SHARE' | 'SWAP' | 'SERVICE' | 'REQUEST' | 'AUCTION';
   sellerId?: string; // Link to profile
   sellerName: string;
   college: string;
@@ -38,6 +47,12 @@ export interface Item {
   verified: boolean;
   status: 'ACTIVE' | 'SOLD' | 'DRAFT' | 'ARCHIVED';
   views?: number;
+  
+  // Auction specific
+  auctionEndsAt?: string;
+  bids?: Bid[];
+  currentBid?: number;
+  bidCount?: number;
 }
 
 export interface UserProfile {
@@ -62,6 +77,12 @@ export interface UserProfile {
     website?: string;
   };
   trustedContacts?: string[]; // List of emails
+  referralCode?: string;
+  referralsCount?: number;
+  preferences?: {
+    interestedCategories?: string[];
+    primaryGoal?: 'BUY' | 'SELL' | 'BOTH';
+  };
 }
 
 export interface Badge {

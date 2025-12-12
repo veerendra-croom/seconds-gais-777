@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { ChevronLeft, ShieldCheck, Mail, Globe, Users, Send, Loader2, CheckCircle2, Zap, Heart, Search, ArrowRight, FileText } from 'lucide-react';
+import { ChevronLeft, ShieldCheck, Mail, Globe, Users, Send, Loader2, CheckCircle2, Zap, Heart, Search, ArrowRight, FileText, Lock, AlertTriangle } from 'lucide-react';
 import { ModuleType, UserProfile } from '../types';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
@@ -40,8 +40,6 @@ export const StaticPages: React.FC<StaticPagesProps> = ({ type, onBack, user }) 
           reason: `[CONTACT_FORM] From: ${contactForm.name} (${contactForm.email}) - Message: ${contactForm.message}`
         });
       } else {
-        // Unauthenticated users trigger an email alert via Edge Function
-        // Note: 'admin@seconds.app' is a placeholder destination. In production, this would be your support alias.
         await api.invokeFunction('send-email', {
            email: 'admin@seconds.app', 
            type: 'ALERT',
@@ -272,32 +270,81 @@ export const StaticPages: React.FC<StaticPagesProps> = ({ type, onBack, user }) 
         );
 
       case 'TERMS':
+        return (
+          <div className="animate-fade-in max-w-4xl mx-auto px-6 py-12">
+             <div className="flex items-center gap-4 mb-8">
+                <div className="p-3 bg-slate-100 rounded-2xl"><FileText size={32} className="text-slate-900"/></div>
+                <div>
+                   <h1 className="text-3xl font-black text-slate-900 tracking-tight">Terms of Service</h1>
+                   <p className="text-slate-500 font-medium">Last updated: {new Date().toLocaleDateString()}</p>
+                </div>
+             </div>
+             
+             <div className="prose prose-slate prose-lg max-w-none bg-white p-10 rounded-3xl shadow-sm border border-slate-100">
+                <h3>1. Introduction</h3>
+                <p>Welcome to Seconds. By accessing our website and mobile application, you agree to be bound by these Terms of Service.</p>
+                
+                <h3>2. Eligibility</h3>
+                <p>You must be a currently enrolled student, faculty, or staff member at a recognized university with a valid <code>.edu</code> email address. Verification via student ID may be required for full access.</p>
+                
+                <h3>3. User Conduct</h3>
+                <p>You agree not to use the platform to:</p>
+                <ul>
+                   <li>List illegal, dangerous, or academic dishonesty materials (e.g., term papers).</li>
+                   <li>Harass, bully, or discriminate against other users.</li>
+                   <li>Attempt to circumvent the platform's payment or verification systems.</li>
+                </ul>
+
+                <h3>4. Transactions & Fees</h3>
+                <p>Seconds acts as a venue. We are not a party to the actual transaction between buyers and sellers. We charge a service fee on successful transactions to cover platform costs.</p>
+
+                <h3>5. Safety</h3>
+                <p>We recommend all in-person transactions take place in designated "Safe Zones" on campus. Seconds is not liable for off-platform disputes or safety incidents.</p>
+
+                <h3>6. Termination</h3>
+                <p>We reserve the right to suspend or ban any account that violates these terms without prior notice.</p>
+             </div>
+          </div>
+        );
+
       case 'PRIVACY':
         return (
-          <div className="animate-fade-in max-w-3xl mx-auto px-6 py-12">
-             <h1 className="text-3xl font-black text-slate-900 mb-8 flex items-center gap-3">
-                <div className="p-3 bg-slate-100 rounded-xl"><FileText size={32}/></div>
-                {type === 'TERMS' ? 'Terms of Service' : 'Privacy Policy'}
-             </h1>
-             <div className="prose prose-slate prose-lg max-w-none bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
-                <p className="lead font-medium text-slate-600">Last updated: {new Date().toLocaleDateString()}</p>
-                {type === 'TERMS' ? (
-                   <>
-                     <h3>1. Eligibility</h3>
-                     <p>You must be a currently enrolled student at a recognized university with a valid .edu email address to use the buying and selling features.</p>
-                     <h3>2. User Conduct</h3>
-                     <p>Users are responsible for their listings. Prohibited items include illegal goods, weapons, and academic dishonesty materials.</p>
-                     <h3>3. Transactions</h3>
-                     <p>Seconds provides a platform for connection. We are not a party to the transactions directly unless specified.</p>
-                   </>
-                ) : (
-                   <>
-                     <h3>Data Collection</h3>
-                     <p>We collect your Name, .edu Email, and Student ID image for verification purposes only. ID images are stored securely and accessible only to admins.</p>
-                     <h3>Location Data</h3>
-                     <p>We use approximate location data to show items near your campus. We never share your exact real-time location.</p>
-                   </>
-                )}
+          <div className="animate-fade-in max-w-4xl mx-auto px-6 py-12">
+             <div className="flex items-center gap-4 mb-8">
+                <div className="p-3 bg-slate-100 rounded-2xl"><Lock size={32} className="text-slate-900"/></div>
+                <div>
+                   <h1 className="text-3xl font-black text-slate-900 tracking-tight">Privacy Policy</h1>
+                   <p className="text-slate-500 font-medium">Last updated: {new Date().toLocaleDateString()}</p>
+                </div>
+             </div>
+             
+             <div className="prose prose-slate prose-lg max-w-none bg-white p-10 rounded-3xl shadow-sm border border-slate-100">
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-8 flex gap-3 text-sm text-blue-800 not-prose">
+                   <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+                   We do not sell your personal data to third parties. Your student data is used strictly for verification and platform functionality.
+                </div>
+
+                <h3>1. Information We Collect</h3>
+                <p>We collect information you provide directly to us, including:</p>
+                <ul>
+                   <li><strong>Identity Data:</strong> Name, university email, and student ID images (for verification only).</li>
+                   <li><strong>Transaction Data:</strong> Details of items bought and sold.</li>
+                   <li><strong>Usage Data:</strong> How you interact with the app.</li>
+                </ul>
+
+                <h3>2. How We Use Your Information</h3>
+                <p>We use your data to:</p>
+                <ul>
+                   <li>Verify your student status.</li>
+                   <li>Facilitate payments and payouts via Stripe.</li>
+                   <li>Provide customer support and safety alerts.</li>
+                </ul>
+
+                <h3>3. Data Security</h3>
+                <p>We use enterprise-grade encryption for all data in transit and at rest. Student ID images are stored in a restricted bucket accessible only to authorized administrators for verification purposes.</p>
+
+                <h3>4. Location Data</h3>
+                <p>If you opt-in, we use your approximate location to show items relevant to your campus. We do not track your real-time location when the app is closed.</p>
              </div>
           </div>
         );

@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { Item, Category, UserProfile, AppNotification, Conversation, Message, Review, Report, Transaction, Booking, SwapProposal, BankAccount, College } from '../types';
+import { Item, Category, UserProfile, AppNotification, Conversation, Message, Review, Report, Transaction, Booking, SwapProposal, BankAccount, College, Bid } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 const parseImages = (imageField: any): string[] => {
@@ -61,11 +61,8 @@ const compressImage = async (file: File): Promise<Blob> => {
 };
 
 export const api = {
+  // ... (keep existing UTILS, EDGE FUNCTION HELPER, PAYMENTS, ITEM methods until getItem) ...
   // --- UTILS ---
-  /**
-   * Geocodes a location string (e.g. "UCLA", "New York University") to Lat/Lng
-   * Uses OpenStreetMap Nominatim API (Free, No Key)
-   */
   getCoordinates: async (location: string): Promise<{ lat: number, lng: number } | null> => {
     try {
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
@@ -80,25 +77,19 @@ export const api = {
     }
   },
 
-  /**
-   * Registers a device for Push Notifications
-   */
   registerPushDevice: async (userId: string, subscription: PushSubscription): Promise<void> => {
     try {
-      // Upsert into devices table
       const { error } = await supabase.from('devices').upsert({
         user_id: userId,
         subscription: subscription,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'subscription' }); // Assuming unique constraint on subscription JSON
-      
+      }, { onConflict: 'subscription' }); 
       if (error) throw error;
     } catch (e) {
       console.warn("Failed to register device", e);
     }
   },
 
-  // --- EDGE FUNCTION HELPER ---
   invokeFunction: async (functionName: string, body: any): Promise<any> => {
     const { data, error } = await supabase.functions.invoke(functionName, {
       body: body
@@ -107,19 +98,10 @@ export const api = {
     return data;
   },
 
-  // --- PAYMENTS (STRIPE INTEGRATION) ---
-  
-  /**
-   * Calls the 'payment-sheet' Edge Function to initialize a Stripe Payment Intent.
-   * @param amount Amount in dollars (e.g. 25.00)
-   * @param currency Default 'usd'
-   */
   createPaymentIntent: async (amount: number, currency: string = 'usd'): Promise<{ clientSecret: string, id: string } | null> => {
-    // Amount must be converted to cents for Stripe
     const { data, error } = await supabase.functions.invoke('payment-sheet', {
       body: { amount: Math.round(amount * 100), currency }
     });
-    
     if (error) throw error;
     return data;
   },
@@ -137,6 +119,20 @@ export const api = {
     
     if (error || !data) return null;
     
+    // Fetch bids if auction
+    let bids: Bid[] = [];
+    if (data.type === 'AUCTION') {
+       const { data: bidsData } = await supabase.from('bids').select('*, bidder:profiles(full_name)').eq('item_id', itemId).order('amount', { ascending: false });
+       bids = bidsData?.map((b: any) => ({
+          id: b.id,
+          itemId: b.item_id,
+          bidderId: b.bidder_id,
+          bidderName: b.bidder?.full_name || 'Anonymous',
+          amount: b.amount,
+          createdAt: b.created_at
+       })) || [];
+    }
+
     const images = parseImages(data.image);
     return {
       id: data.id,
@@ -156,7 +152,13 @@ export const api = {
       rating: data.rating || 5.0,
       description: data.description,
       status: data.status,
-      views: 0 // In real implementation, increment a view counter here
+      views: 0,
+      
+      // Auction fields
+      auctionEndsAt: data.auction_ends_at,
+      bids: bids,
+      currentBid: bids.length > 0 ? bids[0].amount : data.price,
+      bidCount: bids.length
     };
   },
 
@@ -175,9 +177,13 @@ export const api = {
       .eq('status', 'ACTIVE');
     
     let dbType = type;
-    if (type === 'BUY') dbType = 'SALE';
+    if (type === 'BUY') dbType = 'SALE'; // 'BUY' module shows SALE items. We need to handle AUCTION separately or include it.
     if (type === 'EARN') dbType = 'SERVICE';
-    if (['SALE', 'RENT', 'SWAP', 'SERVICE', 'REQUEST'].includes(dbType)) {
+    
+    // For BUY module, we show SALE and AUCTION
+    if (type === 'BUY') {
+       query = query.in('type', ['SALE', 'AUCTION']);
+    } else if (['RENT', 'SHARE', 'SWAP', 'SERVICE', 'REQUEST'].includes(dbType)) {
       query = query.eq('type', dbType);
     }
     
@@ -237,14 +243,34 @@ export const api = {
           verified: item.profiles?.verified || false,
           rating: item.rating || 5.0,
           description: item.description,
-          status: item.status
+          status: item.status,
+          auctionEndsAt: item.auction_ends_at
         };
       });
   },
 
+  // --- AUCTIONS ---
+  placeBid: async (itemId: string, userId: string, amount: number): Promise<void> => {
+     // 1. Verify Bid is higher than current
+     const { data: currentBids } = await supabase.from('bids').select('amount').eq('item_id', itemId).order('amount', { ascending: false }).limit(1);
+     const highestBid = currentBids && currentBids.length > 0 ? currentBids[0].amount : 0;
+     
+     if (amount <= highestBid) throw new Error(`Bid must be higher than $${highestBid}`);
+
+     // 2. Insert Bid
+     const { error } = await supabase.from('bids').insert({
+        item_id: itemId,
+        bidder_id: userId,
+        amount: amount
+     });
+     
+     if (error) throw error;
+
+     // 3. Notify previous bidder (optional logic)
+  },
+
+  // ... (keep existing getTrendingItems, getSimilarItems, getUserItems, getSellerTotalLikes) ...
   getTrendingItems: async (): Promise<Item[]> => {
-    // In a real app with 'views' column, we would order by views.
-    // For now, we fetch the most recent items as 'Trending'.
     return await api.getItems('BUY', 'All', undefined, undefined, 0, 4);
   },
 
@@ -306,24 +332,21 @@ export const api = {
        rating: item.rating || 5,
        description: item.description,
        verified: false,
-       status: item.status
+       status: item.status,
+       auctionEndsAt: item.auction_ends_at
     }));
   },
 
   getSellerTotalLikes: async (userId: string): Promise<number> => {
-    // Count how many times this seller's items have been saved by others
     const { count, error } = await supabase
       .from('saved_items')
       .select('id, items!inner(seller_id)', { count: 'exact', head: true })
       .eq('items.seller_id', userId);
-    
     return count || 0;
   },
 
   createItem: async (itemData: any, userId: string, college: string): Promise<Item | null> => {
-    // Lookup college coordinates to provide real geolocation
     const collegeCoords = await api.getCoordinates(college);
-    // Apply jitter to not stack exactly on top of each other
     const lat = collegeCoords ? collegeCoords.lat + (Math.random() - 0.5) * 0.005 : null;
     const lng = collegeCoords ? collegeCoords.lng + (Math.random() - 0.5) * 0.005 : null;
 
@@ -339,13 +362,16 @@ export const api = {
       college: college,
       status: itemData.status,
       latitude: lat,
-      longitude: lng
+      longitude: lng,
+      auction_ends_at: itemData.auctionEndsAt
     }).select().single();
     
     if (error) throw error;
     return data;
   },
 
+  // ... (keep existing updateItem, deleteItem, uploadImage, getProfile, createProfile, updateProfile, updateTrustedContacts, getUserEarningsHistory, getLeaderboard, subscribeToNotifications, getNotifications, markNotificationAsRead, getSavedItems, checkIsSaved, toggleSavedItem, getUserOrders, getIncomingOffers, getProviderBookings, respondToProposal, updateBookingStatus, confirmOrder, createTransaction, createBooking, createSwapProposal, subscribeToOrder, subscribeToNewItems, getReviews, createReview, hasUserReviewedOrder, createReport, getConversations, getMessages, sendMessage, markMessagesAsRead, subscribeToMessages, subscribeToTyping, blockUser, unblockUser, getBlockedUsers, checkIsBlocked, getColleges, addCollege, updateCollege, deleteCollege, sendCollegeVerification, verifyCollegeEmail, adminGetVerificationImage, checkAdminCode, updateAppConfig, getAppConfig, getAllAppConfigs, adminGetStats, adminGetAnalytics, adminGetRecentTransactions, adminGetAllTransactions, adminManageTransaction, adminBroadcastNotification, adminGetPendingVerifications, adminGetReports, adminGetSupportTickets, adminGetAllUsers, adminGetUserDetail, adminVerifyUser, adminBanUser, adminResolveReport, adminGetAuditLogs, subscribeToAdminEvents, getWalletHistory, getBankAccounts, addBankAccount, deleteBankAccount, withdrawFunds, deleteAccount) ...
+  
   updateItem: async (itemId: string, updates: any): Promise<void> => {
     const dbUpdates = { ...updates };
     if (dbUpdates.images) {
@@ -397,8 +423,6 @@ export const api = {
       return null;
     }
   },
-
-  // --- PROFILES ---
 
   getProfile: async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
@@ -452,8 +476,6 @@ export const api = {
     if (error) throw error;
   },
 
-  // --- USER ANALYTICS ---
-  
   getUserEarningsHistory: async (userId: string): Promise<any[]> => {
     const { data } = await supabase
       .from('transactions')
@@ -492,8 +514,6 @@ export const api = {
       .limit(5);
     return data || [];
   },
-
-  // --- NOTIFICATIONS & SAVED ---
 
   subscribeToNotifications: (userId: string, callback: (n: AppNotification) => void) => {
     return supabase.channel(`notifications:${userId}`)
@@ -574,8 +594,6 @@ export const api = {
      }
   },
 
-  // --- ORDERS / BOOKINGS / SWAPS ---
-
   getUserOrders: async (userId: string): Promise<{purchases: any[], bookings: any[], swaps: any[]}> => {
     const [purchases, bookings, swaps] = await Promise.all([
        supabase.from('transactions').select('*, item:items(*), seller:profiles!seller_id(*), buyer:profiles!buyer_id(*)').or(`buyer_id.eq.${userId},seller_id.eq.${userId}`).order('created_at', { ascending: false }),
@@ -649,8 +667,6 @@ export const api = {
      if (error) throw error;
   },
 
-  // --- REALTIME SUBSCRIPTIONS ---
-
   subscribeToOrder: (orderId: string, type: 'TRANSACTION' | 'BOOKING', callback: (payload: any) => void) => {
     const table = type === 'TRANSACTION' ? 'transactions' : 'bookings';
     return supabase.channel(`order-${orderId}`)
@@ -669,8 +685,6 @@ export const api = {
       })
       .subscribe();
   },
-
-  // --- REVIEWS & REPORTS ---
 
   getReviews: async (userId: string): Promise<Review[]> => {
      const { data, error } = await supabase.from('reviews').select('*, reviewer:profiles!reviewer_id(full_name, avatar_url)').eq('target_user_id', userId).order('created_at', { ascending: false });
@@ -714,8 +728,6 @@ export const api = {
      });
      if (error) throw error;
   },
-
-  // --- MESSAGING & TYPING ---
 
   getConversations: async (userId: string): Promise<Conversation[]> => {
      const { data: messages, error } = await supabase
@@ -821,7 +833,6 @@ export const api = {
       .subscribe();
   },
 
-  // Real-time Typing Indicators using Supabase Broadcast
   subscribeToTyping: (channelId: string, callback: (isTyping: boolean) => void): { sendTyping: (isTyping: boolean) => void, unsubscribe: () => void } => {
     const channel = supabase.channel(`typing:${channelId}`);
     
@@ -866,8 +877,6 @@ export const api = {
      return !!data;
   },
 
-  // --- COLLEGES & VERIFICATION ---
-
   getColleges: async (): Promise<College[]> => {
      const { data } = await supabase.from('colleges').select('*');
      return data || [];
@@ -891,14 +900,12 @@ export const api = {
   sendCollegeVerification: async (email: string): Promise<string> => {
      const otp = Math.floor(100000 + Math.random() * 900000).toString();
      
-     // 1. Persist the code first
      const { error } = await supabase.from('verification_codes').insert({
         email: email,
         code: otp
      });
      if (error) throw error;
 
-     // 2. Try sending the real email via Edge Function
      await api.invokeFunction('send-email', { 
        email, 
        code: otp, 
@@ -942,8 +949,6 @@ export const api = {
 
     return null;
   },
-
-  // --- ADMIN (EXPANDED) ---
 
   checkAdminCode: async (code: string): Promise<boolean> => {
      const { data } = await supabase.from('app_config').select('value').eq('key', 'admin_signup_code').single();
@@ -1053,7 +1058,6 @@ export const api = {
   },
 
   adminManageTransaction: async (txnId: string, action: 'REFUND' | 'RELEASE'): Promise<void> => {
-    // In a real app, this would call Stripe to process refunds
     if (action === 'REFUND') {
        await supabase.from('transactions').update({ status: 'CANCELLED' }).eq('id', txnId);
     } else {
@@ -1062,11 +1066,9 @@ export const api = {
   },
 
   adminBroadcastNotification: async (title: string, message: string): Promise<void> => {
-    // Fetch all user IDs
     const { data: users } = await supabase.from('profiles').select('id');
     if (!users) return;
 
-    // Create notifications in batches
     const notifications = users.map(u => ({
        user_id: u.id,
        type: 'SYSTEM',
@@ -1098,7 +1100,6 @@ export const api = {
   },
 
   adminGetSupportTickets: async (): Promise<any[]> => {
-     // Reports with reason starting with [SUPPORT
      const { data } = await supabase.from('reports').select('*, reporter:profiles!reporter_id(*)').ilike('reason', '[SUPPORT%').eq('status', 'PENDING');
      return data || [];
   },
@@ -1111,7 +1112,6 @@ export const api = {
      return { users: data || [], count: count || 0 };
   },
 
-  // Deep inspection for Admin User Detail View
   adminGetUserDetail: async (userId: string): Promise<any> => {
      const [profile, items, transactions, reports] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', userId).single(),
@@ -1150,7 +1150,6 @@ export const api = {
      await supabase.from('reports').update({ status: 'RESOLVED' }).eq('id', reportId);
   },
 
-  // Audit Logs (using notifications table for simplicity in this implementation, real app would have dedicated table)
   adminGetAuditLogs: async (): Promise<any[]> => {
      const { data } = await supabase.from('notifications').select('*').eq('type', 'SYSTEM').order('created_at', { ascending: false }).limit(50);
      return data || [];
@@ -1162,8 +1161,6 @@ export const api = {
        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, callback)
        .subscribe();
   },
-
-  // --- WALLET ---
 
   getWalletHistory: async (userId: string): Promise<{credits: any[], debits: any[]}> => {
      const { data: credits } = await supabase.from('transactions').select('*, item:items(title)').eq('seller_id', userId);
@@ -1195,22 +1192,18 @@ export const api = {
   },
 
   withdrawFunds: async (userId: string, amount: number): Promise<void> => {
-     // 1. Attempt Payout FIRST to ensure funds can actually be transferred
      const { error: payoutError } = await supabase.functions.invoke('payout-user', {
         body: { userId, amount: Math.round(amount * 100) }
      });
 
      if (payoutError) {
-        // If payout fails, do NOT deduct balance
         console.error("Payout failed:", payoutError);
         throw new Error("Payout service unavailable. Balance not deducted.");
      }
 
-     // 2. Only if payout succeeds, deduct from DB
      const { error } = await supabase.rpc('withdraw_funds', { p_user_id: userId, p_amount: amount });
      
      if (error) {
-        // Critical: Payout succeeded but DB deduction failed. Log this for manual reconciliation.
         console.error("CRITICAL: Payout succeeded but DB deduction failed!", error);
         throw error;
      }

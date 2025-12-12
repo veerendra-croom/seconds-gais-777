@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Conversation, UserProfile } from '../types';
 import { api } from '../services/api';
-import { Search, MessageCircle, ChevronRight, Loader2 } from 'lucide-react';
+import { Search, MessageCircle, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
 
 interface ChatListViewProps {
   user: UserProfile;
@@ -36,7 +36,12 @@ export const ChatListView: React.FC<ChatListViewProps> = ({ user, onSelectChat, 
   return (
     <div className="pb-24 md:pb-8 bg-slate-50 min-h-screen">
       <div className="sticky top-0 z-20 bg-white/80 backdrop-blur-xl border-b border-slate-100 px-6 py-4">
-        <h1 className="text-2xl font-black text-slate-900 tracking-tight mb-4">Messages</h1>
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100 transition-colors text-slate-600">
+            <ChevronLeft size={24} />
+          </button>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Messages</h1>
+        </div>
         <div className="relative group">
            <div className="absolute inset-0 bg-primary-100 rounded-2xl blur opacity-20 group-focus-within:opacity-40 transition-opacity"></div>
            <input 

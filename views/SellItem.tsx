@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, Camera, Sparkles, Loader2, X, AlertCircle, Upload, Save, Trash2, Image as ImageIcon, Plus, ArrowLeft, ArrowRight, RefreshCw, GripHorizontal, Wand2, Mic, MicOff, Leaf } from 'lucide-react';
+import { ChevronLeft, Camera, Sparkles, Loader2, X, AlertCircle, Upload, Save, Trash2, Image as ImageIcon, Plus, ArrowLeft, ArrowRight, RefreshCw, GripHorizontal, Wand2, Mic, MicOff, Leaf, Timer } from 'lucide-react';
 import { generateItemDescription, suggestPrice, analyzeImageForListing, analyzeAudioForListing, checkImageSafety } from '../services/geminiService';
 import { Category, UserProfile, Item } from '../types';
 import { api } from '../services/api';
@@ -47,6 +47,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
     price: '',
     condition: 'Good',
     description: '',
+    auctionDuration: '3' // Default 3 days for auction
   });
 
   // 1. Load Data
@@ -59,6 +60,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         price: itemToEdit.price.toString(),
         condition: 'Good',
         description: itemToEdit.description || '',
+        auctionDuration: '3'
       });
       const loadedImages = itemToEdit.images.map((url, idx) => ({
         id: `existing-${idx}`,
@@ -162,7 +164,6 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
     }
   };
 
-  // ... (Voice logic remains same)
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -321,6 +322,15 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
     
     try {
       const validImageUrls = images.filter(i => i.status === 'complete').map(i => i.url);
+      
+      // Calculate auction end time
+      let auctionEndsAt = undefined;
+      if (formData.type === 'AUCTION') {
+         const endDate = new Date();
+         endDate.setDate(endDate.getDate() + parseInt(formData.auctionDuration));
+         auctionEndsAt = endDate.toISOString();
+      }
+
       const itemData = {
         title: formData.title,
         description: formData.description,
@@ -331,6 +341,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         image: validImageUrls[0] || '',
         status: status,
         originalPrice: Math.abs(parseFloat(formData.price)) * 1.2 || 0,
+        auctionEndsAt: auctionEndsAt
       };
 
       if (itemToEdit) {
@@ -338,7 +349,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
         showToast("Listing updated!", 'success');
       } else {
         await api.createItem(itemData, user.id, user.college);
-        showToast(status === 'ACTIVE' ? "Published!" : "Draft saved", 'success');
+        showToast(status === 'ACTIVE' ? (formData.type === 'AUCTION' ? "Auction Started!" : "Published!") : "Draft saved", 'success');
       }
       if (!itemToEdit) localStorage.removeItem(DRAFT_STORAGE_KEY);
       onBack();
@@ -356,6 +367,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
       case 'RENT': return 'Daily Rate ($)';
       case 'SERVICE': return 'Hourly Rate ($)';
       case 'SHARE': return 'Deposit/Fee (Optional)';
+      case 'AUCTION': return 'Starting Bid ($)';
       default: return 'Price ($)';
     }
   };
@@ -431,7 +443,8 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">Listing Type</label>
               <div className="relative">
                 <select className="w-full p-3.5 bg-white rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 text-base outline-none" value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})}>
-                  <option value="SALE">Sell Item</option>
+                  <option value="SALE">Fixed Price Sale</option>
+                  <option value="AUCTION">Auction (Bidding)</option>
                   <option value="RENT">Rent Out</option>
                   <option value="SWAP">Swap Item</option>
                   <option value="SERVICE">Offer Service</option>
@@ -444,6 +457,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">{formData.type === 'REQUEST' ? 'What do you need?' : 'Title'}</label>
               <input type="text" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g. Calculus Textbook" className="w-full p-3.5 bg-white rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none" />
             </div>
+            
             <div className="grid grid-cols-2 gap-5">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Category</label>
@@ -458,6 +472,30 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                 <input type="number" min="0" value={formData.price} onChange={(e) => setFormData({...formData, price: e.target.value})} placeholder="0.00" className="w-full p-3.5 bg-white rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none" />
               </div>
             </div>
+
+            {/* Auction Duration Config */}
+            {formData.type === 'AUCTION' && (
+               <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 animate-fade-in">
+                  <div className="flex items-center gap-2 mb-3">
+                     <Timer size={18} className="text-orange-600" />
+                     <span className="font-bold text-orange-800 text-sm">Auction Duration</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                     {['1', '3', '7'].map(day => (
+                        <button
+                           key={day}
+                           onClick={() => setFormData({...formData, auctionDuration: day})}
+                           className={`py-2 rounded-lg text-sm font-bold border transition-all ${formData.auctionDuration === day ? 'bg-orange-600 text-white border-orange-600 shadow-sm' : 'bg-white text-slate-600 border-orange-200 hover:bg-orange-100'}`}
+                        >
+                           {day} Days
+                        </button>
+                     ))}
+                  </div>
+                  <p className="text-xs text-orange-700 mt-2">
+                     Highest bid at the end of {formData.auctionDuration} days wins. You can accept earlier manually.
+                  </p>
+               </div>
+            )}
           </div>
 
           <div className="relative overflow-hidden bg-gradient-to-br from-indigo-50 to-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
@@ -489,7 +527,7 @@ export const SellItem: React.FC<SellItemProps> = ({ onBack, user, itemToEdit }) 
                {draftLoading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2" size={20} />} Save Draft
              </button>
              <button onClick={() => handleSave('ACTIVE')} disabled={draftLoading || publishLoading} className="w-full md:w-auto md:px-12 bg-slate-900 text-white py-4 rounded-xl font-bold text-base shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center justify-center disabled:opacity-70">
-               {publishLoading ? <Loader2 className="animate-spin mr-2" /> : <Upload className="mr-2" size={20} />} {itemToEdit ? 'Update' : 'Publish'}
+               {publishLoading ? <Loader2 className="animate-spin mr-2" /> : <Upload className="mr-2" size={20} />} {itemToEdit ? 'Update' : (formData.type === 'AUCTION' ? 'Start Auction' : 'Publish')}
              </button>
           </div>
         </div>

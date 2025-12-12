@@ -122,7 +122,12 @@ const AppContent: React.FC = () => {
       return;
     }
     // Push new state to history
-    window.history.pushState({ view: currentView }, '', `#${currentView.toLowerCase()}`);
+    try {
+      window.history.pushState({ view: currentView }, '', `#${currentView.toLowerCase()}`);
+    } catch (e) {
+      // Ignore history errors in sandboxed environments
+      console.warn("History API restricted, navigation state will be local only.");
+    }
     window.scrollTo(0, 0);
   }, [currentView]);
 
@@ -138,6 +143,18 @@ const AppContent: React.FC = () => {
 
   const changeView = (view: ModuleType, pushToHistory = true) => {
     setCurrentView(view);
+  };
+
+  // Global Back Handler
+  const handleGlobalBack = () => {
+    // If browser history has entries, go back. 
+    // If not (e.g. freshly loaded), default to HOME or LANDING depending on auth.
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      if (userProfile) changeView('HOME');
+      else changeView('LANDING');
+    }
   };
 
   const fetchUserProfile = async (userId: string) => {
@@ -181,10 +198,10 @@ const AppContent: React.FC = () => {
   const handleSellBack = () => {
     if (editingItem) {
       setEditingItem(null);
-      changeView('SELLER_DASHBOARD');
+      handleGlobalBack(); // Use global back
     } else {
       setEditingItem(null);
-      changeView('HOME');
+      handleGlobalBack();
     }
   };
 
@@ -315,7 +332,7 @@ const AppContent: React.FC = () => {
 
     if (!userProfile) return <SplashView />;
 
-    if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} onSwitchToApp={() => changeView('HOME')} />;
+    if (currentView === 'ADMIN_DASHBOARD') return <AdminDashboard user={userProfile} onSwitchToApp={() => changeView('HOME')} onBack={handleGlobalBack} />;
     
     if (maintenanceMode && (userProfile.role as string) !== 'ADMIN') {
        return (
@@ -344,30 +361,30 @@ const AppContent: React.FC = () => {
     if (currentView === 'COLLEGE_LINK') return <CollegeLinkView userId={userProfile.id} onSuccess={() => changeView('HOME')} />;
 
     switch (currentView) {
-      case 'HOME': return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
+      case 'HOME': return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
       case 'SELL': return <SellItem user={userProfile} onBack={handleSellBack} itemToEdit={editingItem} />;
-      case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} onViewOrder={handleViewOrder} onGoToDashboard={() => changeView('SELLER_DASHBOARD')} />;
-      case 'MY_ORDERS': return <ProfileView user={userProfile} onEditItem={handleEditItem} initialTab="BUYING" onViewOrder={handleViewOrder} />;
+      case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} onViewOrder={handleViewOrder} onGoToDashboard={() => changeView('SELLER_DASHBOARD')} onBack={handleGlobalBack} />;
+      case 'MY_ORDERS': return <ProfileView user={userProfile} onEditItem={handleEditItem} initialTab="BUYING" onViewOrder={handleViewOrder} onBack={handleGlobalBack} />;
       case 'PUBLIC_PROFILE': 
         return publicProfile 
-          ? <ProfileView user={publicProfile} isPublic onStartChat={handleStartChatWithUser} onBack={() => changeView('HOME')} /> 
+          ? <ProfileView user={publicProfile} isPublic onStartChat={handleStartChatWithUser} onBack={handleGlobalBack} /> 
           : <div className="p-20 text-center">Loading Profile...</div>;
       case 'ITEM_DETAIL': 
-        if (!selectedItem) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
-        return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={() => window.history.back()} onChat={handleStartChat} onViewProfile={handleViewProfile} onItemClick={handleItemClick} />;
+        if (!selectedItem) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
+        return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={handleGlobalBack} onChat={handleStartChat} onViewProfile={handleViewProfile} onItemClick={handleItemClick} />;
       case 'ORDER_DETAIL':
-        if (!selectedOrder) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
-        return <OrderDetailView order={selectedOrder.data} type={selectedOrder.type} user={userProfile} onBack={() => window.history.back()} onChat={handleStartChatById} onScan={handleStartScan} />;
+        if (!selectedOrder) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
+        return <OrderDetailView order={selectedOrder.data} type={selectedOrder.type} user={userProfile} onBack={handleGlobalBack} onChat={handleStartChatById} onScan={handleStartScan} />;
       case 'NOTIFICATIONS': 
-        return <NotificationsView userId={userProfile.id} onBack={() => changeView('HOME')} onNotificationClick={handleNotificationClick} />;
+        return <NotificationsView userId={userProfile.id} onBack={handleGlobalBack} onNotificationClick={handleNotificationClick} />;
       case 'QR_SCANNER':
-        return <QRScannerView onBack={() => changeView('ORDER_DETAIL')} onScanSuccess={handleScanSuccess} expectedCode={scanContext?.expectedCode} />;
+        return <QRScannerView onBack={handleGlobalBack} onScanSuccess={handleScanSuccess} expectedCode={scanContext?.expectedCode} />;
       case 'SELLER_DASHBOARD': 
-        return <SellerDashboardView user={userProfile} onBack={() => changeView('PROFILE')} onEditItem={handleEditItem} />;
+        return <SellerDashboardView user={userProfile} onBack={handleGlobalBack} onEditItem={handleEditItem} />;
       case 'SAFETY':
-        return <SafetyView user={userProfile} onBack={() => changeView('HOME')} onVerifyClick={() => changeView('COLLEGE_LINK')} />;
-      case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={() => changeView('HOME')} />;
-      case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={() => changeView('CHAT_LIST')} onViewItem={handleViewItemFromChat} />;
+        return <SafetyView user={userProfile} onBack={handleGlobalBack} onVerifyClick={() => changeView('COLLEGE_LINK')} />;
+      case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={handleGlobalBack} />;
+      case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={handleGlobalBack} onViewItem={handleViewItemFromChat} />;
       case 'BUY':
       case 'RENT':
       case 'SHARE':
@@ -377,12 +394,12 @@ const AppContent: React.FC = () => {
         return <Marketplace 
           type={currentView} 
           user={userProfile} 
-          onBack={() => changeView('HOME')} 
+          onBack={handleGlobalBack} 
           onItemClick={handleItemClick} 
           initialSearchQuery={globalSearchQuery} 
           onSellClick={() => changeView('SELL')}
         />;
-      default: return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} />;
+      default: return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
     }
   };
 
