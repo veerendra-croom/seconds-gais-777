@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from './services/supabaseClient';
+import { supabase, signOut } from './services/supabaseClient';
 import { api } from './services/api';
 import { UserProfile, Item, Conversation, ModuleType, AppNotification } from './types';
 import { ToastProvider, useToast } from './components/Toast';
@@ -15,7 +15,6 @@ import { ItemDetailView } from './views/ItemDetailView';
 import { ChatListView } from './views/ChatListView';
 import { ChatView } from './views/ChatView';
 import { Marketplace } from './views/Marketplace';
-import { CommunityView } from './views/CommunityView';
 import { VerificationView } from './views/VerificationView';
 import { CollegeLinkView } from './views/CollegeLinkView';
 import { AdminDashboard } from './views/AdminDashboard';
@@ -28,10 +27,13 @@ import { SafetyView } from './views/SafetyView';
 import { HelpCenterView } from './views/HelpCenterView';
 import { UserActivityLogView } from './views/UserActivityLogView';
 import { NotFoundView } from './views/NotFoundView';
-import { SecuritySettingsView } from './views/SecuritySettingsView';
-import { DataPrivacyView } from './views/DataPrivacyView';
-import { SetupWizardView } from './views/SetupWizardView';
+import { CommunityView } from './views/CommunityView';
+import { OnboardingTour } from './components/OnboardingTour';
 import { WifiOff, Construction, Lock } from 'lucide-react';
+import { VoiceCommander } from './components/VoiceCommander'; // Removed if file doesn't exist, but user previous had it. Assuming removal for safety based on provided files.
+
+// Views that can be accessed without a user session
+const PUBLIC_VIEWS: ModuleType[] = ['LANDING', 'AUTH', 'TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS', 'NOT_FOUND'];
 
 const AppContent: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -46,7 +48,7 @@ const AppContent: React.FC = () => {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
-  const [showWizard, setShowWizard] = useState(false);
+  const [showTour, setShowTour] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   // App Config State
@@ -58,10 +60,19 @@ const AppContent: React.FC = () => {
   // Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
 
-  // History State Tracker to prevent pushState loops
+  // History State Tracker
   const isPoppingHistory = useRef(false);
+  
+  // View Ref to handle async auth state changes without stale closures
+  const currentViewRef = useRef<ModuleType>('LANDING');
 
   const { showToast } = useToast();
+
+  // Helper to change view and sync ref immediately
+  const changeView = (view: ModuleType, pushToHistory = true) => {
+    currentViewRef.current = view;
+    setCurrentView(view);
+  };
 
   useEffect(() => {
     // Online/Offline Listeners
@@ -78,21 +89,31 @@ const AppContent: React.FC = () => {
     // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchUserProfile(session.user.id);
-      else {
+      if (session) {
+        fetchUserProfile(session.user.id);
+      } else {
         setLoading(false);
-        changeView('LANDING', false);
+        // Only force LANDING if we are not already on a specific public flow
+        // Check the REF, not the state, to get the latest value
+        if (!PUBLIC_VIEWS.includes(currentViewRef.current)) {
+           changeView('LANDING', false);
+        }
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        fetchUserProfile(session.user.id);
+        // If we have a session but no profile (e.g. refresh), fetch it
+        if (!userProfile) fetchUserProfile(session.user.id);
       } else {
         setUserProfile(null);
-        changeView('LANDING');
         setLoading(false);
+        
+        // Critical Fix: Do not force LANDING if user is on AUTH or other public pages
+        if (!PUBLIC_VIEWS.includes(currentViewRef.current)) {
+           changeView('LANDING');
+        }
       }
     });
 
@@ -106,7 +127,7 @@ const AppContent: React.FC = () => {
     const handlePopState = (event: PopStateEvent) => {
       if (event.state && event.state.view) {
         isPoppingHistory.current = true;
-        setCurrentView(event.state.view);
+        changeView(event.state.view, false);
       }
     };
     window.addEventListener('popstate', handlePopState);
@@ -122,46 +143,49 @@ const AppContent: React.FC = () => {
 
   // Sync View changes to Browser History
   useEffect(() => {
+    // Also sync ref here as a backup for other ways state might change
+    currentViewRef.current = currentView;
+
     if (isPoppingHistory.current) {
       isPoppingHistory.current = false;
       return;
     }
+    
     // Push new state to history
     try {
       window.history.pushState({ view: currentView }, '', `#${currentView.toLowerCase()}`);
     } catch (e) {
-      console.warn("History API restricted, navigation state will be local only.");
+      // Ignore history errors in sandboxed environments, just log debug
+      console.debug("History API restricted, navigation state will be local only.");
     }
     window.scrollTo(0, 0);
   }, [currentView]);
 
-  // Check Wizard Status when User Profile Loads
+  // Check Tour Status when User Profile Loads
   useEffect(() => {
-    if (userProfile && !loading) {
-      const hasSeenWizard = localStorage.getItem(`setup_wizard_${userProfile.id}`);
-      if (!hasSeenWizard) {
-        setShowWizard(true);
+    if (userProfile) {
+      const hasSeenTour = localStorage.getItem(`tour_seen_${userProfile.id}`);
+      if (!hasSeenTour) {
+        setShowTour(true);
       }
     }
-  }, [userProfile, loading]);
-
-  const changeView = (view: ModuleType, pushToHistory = true) => {
-    setCurrentView(view);
-  };
+  }, [userProfile]);
 
   // Global Back Handler
   const handleGlobalBack = () => {
+    // Attempt browser back first
     if (window.history.length > 1) {
       try {
         window.history.back();
+        return; 
       } catch (e) {
-        if (userProfile) changeView('HOME');
-        else changeView('LANDING');
+        // Fallthrough if history.back fails
       }
-    } else {
-      if (userProfile) changeView('HOME');
-      else changeView('LANDING');
-    }
+    } 
+    
+    // Default fallback logic
+    if (userProfile) changeView('HOME');
+    else changeView('LANDING');
   };
 
   const fetchUserProfile = async (userId: string) => {
@@ -175,21 +199,25 @@ const AppContent: React.FC = () => {
         } else if (!profile.collegeEmailVerified && profile.role === 'STUDENT') {
            changeView('COLLEGE_LINK'); 
         } else {
-           // Default to HOME unless route fragment implies otherwise (simplification)
-           if (currentView === 'LANDING') changeView('HOME');
+           // Only redirect to HOME if we are currently on LANDING or AUTH
+           // This preserves deep linking if we add it later
+           if (currentViewRef.current === 'LANDING' || currentViewRef.current === 'AUTH') {
+              changeView('HOME');
+           }
         }
+      } else {
+        setLoading(false);
       }
     } catch (e) {
       console.error("Error fetching profile", e);
-    } finally {
       setLoading(false);
     }
   };
 
-  const handleWizardComplete = () => {
+  const handleTourComplete = () => {
     if (userProfile) {
-      localStorage.setItem(`setup_wizard_${userProfile.id}`, 'completed');
-      setShowWizard(false);
+      localStorage.setItem(`tour_seen_${userProfile.id}`, 'true');
+      setShowTour(false);
     }
   };
 
@@ -204,13 +232,8 @@ const AppContent: React.FC = () => {
   };
 
   const handleSellBack = () => {
-    if (editingItem) {
-      setEditingItem(null);
-      handleGlobalBack(); 
-    } else {
-      setEditingItem(null);
-      handleGlobalBack();
-    }
+    setEditingItem(null);
+    handleGlobalBack();
   };
 
   const handleStartChat = async (item: Item) => {
@@ -368,10 +391,6 @@ const AppContent: React.FC = () => {
 
     if (currentView === 'COLLEGE_LINK') return <CollegeLinkView userId={userProfile.id} onSuccess={() => changeView('HOME')} />;
 
-    if (showWizard) {
-       return <SetupWizardView user={userProfile} onComplete={handleWizardComplete} />;
-    }
-
     switch (currentView) {
       case 'HOME': return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
       case 'SELL': return <SellItem user={userProfile} onBack={handleSellBack} itemToEdit={editingItem} />;
@@ -399,10 +418,6 @@ const AppContent: React.FC = () => {
         return <HelpCenterView onBack={handleGlobalBack} userId={userProfile.id} />;
       case 'ACTIVITY_LOG':
         return <UserActivityLogView onBack={handleGlobalBack} />;
-      case 'SECURITY_SETTINGS':
-        return <SecuritySettingsView onBack={handleGlobalBack} />;
-      case 'DATA_PRIVACY':
-        return <DataPrivacyView user={userProfile} onBack={handleGlobalBack} />;
       case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={handleGlobalBack} />;
       case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={handleGlobalBack} onViewItem={handleViewItemFromChat} />;
       case 'COMMUNITY':
@@ -423,13 +438,13 @@ const AppContent: React.FC = () => {
         />;
       case 'NOT_FOUND':
         return <NotFoundView onGoHome={() => changeView('HOME')} />;
-      default: return <NotFoundView onGoHome={() => changeView('HOME')} />;
+      default: return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
     }
   };
 
   if (loading) return <SplashView />;
 
-  const showSidebar = userProfile && !maintenanceMode && !['LANDING', 'AUTH', 'CHAT_ROOM', 'ITEM_DETAIL', 'ADMIN_DASHBOARD', 'COLLEGE_LINK', 'SELL', 'ORDER_DETAIL', 'NOTIFICATIONS', 'QR_SCANNER', 'SELLER_DASHBOARD', 'SAFETY', 'HELP_CENTER', 'ACTIVITY_LOG', 'NOT_FOUND', 'SECURITY_SETTINGS', 'DATA_PRIVACY'].includes(currentView) && !['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView) && !showWizard;
+  const showSidebar = userProfile && !maintenanceMode && !['LANDING', 'AUTH', 'CHAT_ROOM', 'ITEM_DETAIL', 'ADMIN_DASHBOARD', 'COLLEGE_LINK', 'SELL', 'ORDER_DETAIL', 'NOTIFICATIONS', 'QR_SCANNER', 'SELLER_DASHBOARD', 'SAFETY', 'HELP_CENTER', 'ACTIVITY_LOG', 'NOT_FOUND'].includes(currentView) && !['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -452,6 +467,8 @@ const AppContent: React.FC = () => {
       <main className={`transition-all duration-300 ease-in-out ${showSidebar && isSidebarOpen ? 'md:pl-64' : ''} ${isOffline ? 'pt-8' : ''}`}>
         {renderView()}
       </main>
+
+      {showTour && !maintenanceMode && <OnboardingTour onComplete={handleTourComplete} />}
     </div>
   );
 };

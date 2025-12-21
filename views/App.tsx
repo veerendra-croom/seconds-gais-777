@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../services/supabaseClient';
+import { supabase, signOut } from '../services/supabaseClient';
 import { api } from '../services/api';
 import { UserProfile, Item, Conversation, ModuleType, AppNotification } from '../types';
 import { ToastProvider, useToast } from '../components/Toast';
@@ -26,6 +26,17 @@ import { SellerDashboardView } from './views/SellerDashboardView';
 import { SafetyView } from './views/SafetyView';
 import { OnboardingTour } from './components/OnboardingTour';
 import { WifiOff, Construction, Lock } from 'lucide-react';
+import { VoiceCommander } from './components/VoiceCommander';
+import { NotFoundView } from './views/NotFoundView';
+import { UserActivityLogView } from './views/UserActivityLogView';
+import { HelpCenterView } from './views/HelpCenterView';
+import { SecuritySettingsView } from './views/SecuritySettingsView';
+import { DataPrivacyView } from './views/DataPrivacyView';
+import { SetupWizardView } from './views/SetupWizardView';
+import { CommunityView } from './views/CommunityView';
+
+// Views accessible without authentication
+const PUBLIC_VIEWS: ModuleType[] = ['LANDING', 'AUTH', 'TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS', 'NOT_FOUND'];
 
 const AppContent: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -40,6 +51,7 @@ const AppContent: React.FC = () => {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [publicProfile, setPublicProfile] = useState<UserProfile | null>(null);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [showWizard, setShowWizard] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
@@ -52,41 +64,52 @@ const AppContent: React.FC = () => {
   // Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
 
-  // History State Tracker to prevent pushState loops
+  // History State Tracker
   const isPoppingHistory = useRef(false);
+  
+  // Sync view ref for async callbacks
+  const currentViewRef = useRef<ModuleType>('LANDING');
 
   const { showToast } = useToast();
 
+  const changeView = (view: ModuleType) => {
+    currentViewRef.current = view;
+    setCurrentView(view);
+  };
+
   useEffect(() => {
-    // Online/Offline Listeners
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Initial Config Load
     api.getAppConfig('maintenance_mode').then(val => {
        setMaintenanceMode(val === 'true');
     });
 
-    // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchUserProfile(session.user.id);
-      else {
+      if (session) {
+        fetchUserProfile(session.user.id);
+      } else {
         setLoading(false);
-        changeView('LANDING', false);
+        if (!PUBLIC_VIEWS.includes(currentViewRef.current)) {
+           changeView('LANDING');
+        }
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        fetchUserProfile(session.user.id);
+        if (!userProfile) fetchUserProfile(session.user.id);
       } else {
         setUserProfile(null);
-        changeView('LANDING');
         setLoading(false);
+        // Only force Landing if not currently on a public/auth view
+        if (!PUBLIC_VIEWS.includes(currentViewRef.current)) {
+           changeView('LANDING');
+        }
       }
     });
 
@@ -96,12 +119,10 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('resize', handleResize);
 
-    // Browser Back Button Handler
     const handlePopState = (event: PopStateEvent) => {
       if (event.state && event.state.view) {
         isPoppingHistory.current = true;
-        setCurrentView(event.state.view);
-        // Optional: Restore context if you save it in state, e.g. event.state.itemId
+        changeView(event.state.view);
       }
     };
     window.addEventListener('popstate', handlePopState);
@@ -115,45 +136,40 @@ const AppContent: React.FC = () => {
     };
   }, []);
 
-  // Sync View changes to Browser History
   useEffect(() => {
     if (isPoppingHistory.current) {
       isPoppingHistory.current = false;
       return;
     }
-    // Push new state to history
     try {
       window.history.pushState({ view: currentView }, '', `#${currentView.toLowerCase()}`);
     } catch (e) {
-      // Ignore history errors in sandboxed environments
-      console.warn("History API restricted, navigation state will be local only.");
+      // Quiet fail for environments restricted by History API
     }
     window.scrollTo(0, 0);
   }, [currentView]);
 
-  // Check Tour Status when User Profile Loads
   useEffect(() => {
-    if (userProfile) {
-      const hasSeenTour = localStorage.getItem(`tour_seen_${userProfile.id}`);
-      if (!hasSeenTour) {
-        setShowTour(true);
+    if (userProfile && !loading) {
+      const hasSeenWizard = localStorage.getItem(`setup_wizard_${userProfile.id}`);
+      if (!hasSeenWizard) {
+        setShowWizard(true);
+      } else {
+        const hasSeenTour = localStorage.getItem(`tour_seen_${userProfile.id}`);
+        if (!hasSeenTour) setShowTour(true);
       }
     }
-  }, [userProfile]);
+  }, [userProfile, loading]);
 
-  const changeView = (view: ModuleType, pushToHistory = true) => {
-    setCurrentView(view);
-  };
-
-  // Global Back Handler
   const handleGlobalBack = () => {
-    // If browser history has entries, go back. 
-    // If not (e.g. freshly loaded), default to HOME or LANDING depending on auth.
     if (window.history.length > 1) {
-      window.history.back();
+      try {
+        window.history.back();
+      } catch (e) {
+        changeView(userProfile ? 'HOME' : 'LANDING');
+      }
     } else {
-      if (userProfile) changeView('HOME');
-      else changeView('LANDING');
+      changeView(userProfile ? 'HOME' : 'LANDING');
     }
   };
 
@@ -162,19 +178,29 @@ const AppContent: React.FC = () => {
       const profile = await api.getProfile(userId);
       if (profile) {
         setUserProfile(profile);
-        // Determine initial view based on profile status
         if (profile.role === 'ADMIN') {
           changeView('ADMIN_DASHBOARD');
         } else if (!profile.collegeEmailVerified && profile.role === 'STUDENT') {
            changeView('COLLEGE_LINK'); 
         } else {
-           changeView('HOME');
+           if (currentViewRef.current === 'LANDING' || currentViewRef.current === 'AUTH') {
+              changeView('HOME');
+           }
         }
+      } else {
+        setLoading(false);
       }
     } catch (e) {
-      console.error("Error fetching profile", e);
-    } finally {
       setLoading(false);
+    }
+  };
+
+  const handleWizardComplete = () => {
+    if (userProfile) {
+      localStorage.setItem(`setup_wizard_${userProfile.id}`, 'completed');
+      setShowWizard(false);
+      const hasSeenTour = localStorage.getItem(`tour_seen_${userProfile.id}`);
+      if (!hasSeenTour) setShowTour(true);
     }
   };
 
@@ -195,25 +221,11 @@ const AppContent: React.FC = () => {
     changeView('SELL');
   };
 
-  const handleSellBack = () => {
-    if (editingItem) {
-      setEditingItem(null);
-      handleGlobalBack(); // Use global back
-    } else {
-      setEditingItem(null);
-      handleGlobalBack();
-    }
-  };
-
   const handleStartChat = async (item: Item) => {
     if (!userProfile) return;
-    try {
-      setSelectedItem(item);
-      setActiveConversation(null); 
-      changeView('CHAT_ROOM');
-    } catch (e) {
-      showToast("Could not start chat", 'error');
-    }
+    setSelectedItem(item);
+    setActiveConversation(null); 
+    changeView('CHAT_ROOM');
   };
 
   const handleStartChatWithUser = (user: UserProfile) => {
@@ -229,26 +241,15 @@ const AppContent: React.FC = () => {
      changeView('CHAT_ROOM');
   };
 
-  const handleStartChatById = (partnerId: string) => {
-     if (!userProfile) return;
-     api.getProfile(partnerId).then(partner => {
-        if(partner) handleStartChatWithUser(partner);
-     });
-  };
-
   const handleViewProfile = async (userId: string) => {
     if (userProfile && userId === userProfile.id) {
       changeView('PROFILE');
       return;
     }
-    try {
-      const profile = await api.getProfile(userId);
-      if (profile) {
-        setPublicProfile(profile);
-        changeView('PUBLIC_PROFILE');
-      }
-    } catch (e) {
-      showToast("Could not load profile", 'error');
+    const profile = await api.getProfile(userId);
+    if (profile) {
+      setPublicProfile(profile);
+      changeView('PUBLIC_PROFILE');
     }
   };
 
@@ -259,18 +260,10 @@ const AppContent: React.FC = () => {
   };
 
   const handleViewItemFromChat = async (itemId: string) => {
-    try {
-      if (selectedItem && selectedItem.id === itemId) {
-        changeView('ITEM_DETAIL');
-        return;
-      }
-      const item = await api.getItem(itemId);
-      if (item) {
-        setSelectedItem(item);
-        changeView('ITEM_DETAIL');
-      }
-    } catch (e) {
-      console.error("Failed to load item from chat", e);
+    const item = await api.getItem(itemId);
+    if (item) {
+      setSelectedItem(item);
+      changeView('ITEM_DETAIL');
     }
   };
 
@@ -289,9 +282,6 @@ const AppContent: React.FC = () => {
      try {
        await api.confirmOrder(scanContext.orderId, userProfile.id);
        showToast("Handover Verified! Order Complete.", 'success');
-       if (selectedOrder) {
-          setSelectedOrder(prev => prev ? ({...prev, data: {...prev.data, status: 'COMPLETED'}}) : null);
-       }
        changeView('ORDER_DETAIL');
      } catch (e) {
        showToast("Verification failed.", 'error');
@@ -309,15 +299,6 @@ const AppContent: React.FC = () => {
     }
   };
 
-  const handleViewChange = (view: ModuleType) => {
-    if (currentView === 'SELL' && view !== 'SELL') setEditingItem(null);
-    if (view === 'CHAT_LIST') setActiveConversation(null);
-    if (view !== 'BUY' && view !== 'RENT' && view !== 'SHARE' && view !== 'SWAP' && view !== 'EARN' && view !== 'REQUEST') {
-       setGlobalSearchQuery('');
-    }
-    changeView(view);
-  }
-
   const handleSearch = (query: string) => {
     setGlobalSearchQuery(query);
     changeView('BUY'); 
@@ -327,7 +308,7 @@ const AppContent: React.FC = () => {
     if (currentView === 'LANDING') return <LandingView onGetStarted={() => changeView('AUTH')} onViewPage={changeView} />;
     if (currentView === 'AUTH') return <AuthView onSuccess={() => window.location.reload()} onBack={() => changeView('LANDING')} onViewPage={changeView} />;
     if (['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView)) {
-      return <StaticPages type={currentView} onBack={() => userProfile ? changeView('HOME') : changeView('LANDING')} user={userProfile} />;
+      return <StaticPages type={currentView} onBack={handleGlobalBack} user={userProfile} />;
     }
 
     if (!userProfile) return <SplashView />;
@@ -341,19 +322,8 @@ const AppContent: React.FC = () => {
                <Construction size={48} className="text-amber-400" />
             </div>
             <h1 className="text-3xl font-black text-white mb-4">Under Maintenance</h1>
-            <p className="text-slate-400 max-w-sm leading-relaxed mb-8">
-               We are upgrading the Seconds platform to serve you better. Check back soon for a faster, safer marketplace.
-            </p>
-            <div className="flex gap-4">
-               <button onClick={() => window.location.reload()} className="px-6 py-3 bg-white text-slate-900 rounded-xl font-bold hover:bg-slate-200 transition-colors">
-                  Try Again
-               </button>
-               {userProfile.role === 'ADMIN' && (
-                 <button onClick={() => changeView('ADMIN_DASHBOARD')} className="px-6 py-3 border border-white/20 text-white rounded-xl font-bold hover:bg-white/10 flex items-center gap-2">
-                    <Lock size={16} /> Admin Access
-                 </button>
-               )}
-            </div>
+            <p className="text-slate-400 max-w-sm leading-relaxed mb-8">Upgrading platform...</p>
+            <button onClick={() => window.location.reload()} className="px-6 py-3 bg-white text-slate-900 rounded-xl font-bold">Try Again</button>
          </div>
        );
     }
@@ -362,9 +332,9 @@ const AppContent: React.FC = () => {
 
     switch (currentView) {
       case 'HOME': return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
-      case 'SELL': return <SellItem user={userProfile} onBack={handleSellBack} itemToEdit={editingItem} />;
-      case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} onViewOrder={handleViewOrder} onGoToDashboard={() => changeView('SELLER_DASHBOARD')} onBack={handleGlobalBack} />;
-      case 'MY_ORDERS': return <ProfileView user={userProfile} onEditItem={handleEditItem} initialTab="BUYING" onViewOrder={handleViewOrder} onBack={handleGlobalBack} />;
+      case 'SELL': return <SellItem user={userProfile} onBack={handleGlobalBack} itemToEdit={editingItem} />;
+      case 'PROFILE': return <ProfileView user={userProfile} onEditItem={handleEditItem} onViewOrder={handleViewOrder} onGoToDashboard={() => changeView('SELLER_DASHBOARD')} onBack={handleGlobalBack} onNavigate={changeView} />;
+      case 'MY_ORDERS': return <ProfileView user={userProfile} onEditItem={handleEditItem} initialTab="BUYING" onViewOrder={handleViewOrder} onBack={handleGlobalBack} onNavigate={changeView} />;
       case 'PUBLIC_PROFILE': 
         return publicProfile 
           ? <ProfileView user={publicProfile} isPublic onStartChat={handleStartChatWithUser} onBack={handleGlobalBack} /> 
@@ -374,15 +344,23 @@ const AppContent: React.FC = () => {
         return <ItemDetailView item={selectedItem} currentUser={userProfile} onBack={handleGlobalBack} onChat={handleStartChat} onViewProfile={handleViewProfile} onItemClick={handleItemClick} />;
       case 'ORDER_DETAIL':
         if (!selectedOrder) return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
-        return <OrderDetailView order={selectedOrder.data} type={selectedOrder.type} user={userProfile} onBack={handleGlobalBack} onChat={handleStartChatById} onScan={handleStartScan} />;
+        return <OrderDetailView order={selectedOrder.data} type={selectedOrder.type} user={userProfile} onBack={handleGlobalBack} onChat={handleStartChatWithUser} onScan={handleStartScan} />;
       case 'NOTIFICATIONS': 
         return <NotificationsView userId={userProfile.id} onBack={handleGlobalBack} onNotificationClick={handleNotificationClick} />;
       case 'QR_SCANNER':
-        return <QRScannerView onBack={handleGlobalBack} onScanSuccess={handleScanSuccess} expectedCode={scanContext?.expectedCode} />;
+        return <QRScannerView onBack={handleGlobalBack} onScanSuccess={handleScanSuccess} />;
       case 'SELLER_DASHBOARD': 
         return <SellerDashboardView user={userProfile} onBack={handleGlobalBack} onEditItem={handleEditItem} />;
       case 'SAFETY':
         return <SafetyView user={userProfile} onBack={handleGlobalBack} onVerifyClick={() => changeView('COLLEGE_LINK')} />;
+      case 'HELP_CENTER':
+        return <HelpCenterView onBack={handleGlobalBack} userId={userProfile.id} />;
+      case 'ACTIVITY_LOG':
+        return <UserActivityLogView onBack={handleGlobalBack} />;
+      case 'SECURITY_SETTINGS':
+        return <SecuritySettingsView onBack={handleGlobalBack} />;
+      case 'DATA_PRIVACY':
+        return <DataPrivacyView user={userProfile} onBack={handleGlobalBack} />;
       case 'CHAT_LIST': return <ChatListView user={userProfile} onSelectChat={handleSelectChat} onBack={handleGlobalBack} />;
       case 'CHAT_ROOM': return <ChatView currentUser={userProfile} activeConversation={activeConversation} targetItem={selectedItem || undefined} onBack={handleGlobalBack} onViewItem={handleViewItemFromChat} />;
       case 'BUY':
@@ -391,45 +369,44 @@ const AppContent: React.FC = () => {
       case 'SWAP':
       case 'EARN':
       case 'REQUEST':
-        return <Marketplace 
-          type={currentView} 
-          user={userProfile} 
-          onBack={handleGlobalBack} 
-          onItemClick={handleItemClick} 
-          initialSearchQuery={globalSearchQuery} 
-          onSellClick={() => changeView('SELL')}
-        />;
+        return <Marketplace type={currentView} user={userProfile} onBack={handleGlobalBack} onItemClick={handleItemClick} initialSearchQuery={globalSearchQuery} onSellClick={() => changeView('SELL')} />;
+      case 'COMMUNITY':
+        return <CommunityView user={userProfile} onBack={handleGlobalBack} onItemClick={handleItemClick} onChat={handleStartChat} onPostClick={() => changeView('SELL')} />;
+      case 'NOT_FOUND':
+        return <NotFoundView onGoHome={() => changeView('HOME')} />;
       default: return <Home user={userProfile} onModuleSelect={changeView} onItemClick={handleItemClick} onSearch={handleSearch} onNotificationClick={handleNotificationClick} onBack={handleGlobalBack} />;
     }
   };
 
   if (loading) return <SplashView />;
 
-  const showSidebar = userProfile && !maintenanceMode && !['LANDING', 'AUTH', 'CHAT_ROOM', 'ITEM_DETAIL', 'ADMIN_DASHBOARD', 'COLLEGE_LINK', 'SELL', 'ORDER_DETAIL', 'NOTIFICATIONS', 'QR_SCANNER', 'SELLER_DASHBOARD', 'SAFETY'].includes(currentView) && !['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView);
+  const showSidebar = userProfile && !maintenanceMode && !['LANDING', 'AUTH', 'CHAT_ROOM', 'ITEM_DETAIL', 'ADMIN_DASHBOARD', 'COLLEGE_LINK', 'SELL', 'ORDER_DETAIL', 'NOTIFICATIONS', 'QR_SCANNER', 'SELLER_DASHBOARD', 'SAFETY', 'HELP_CENTER', 'ACTIVITY_LOG', 'NOT_FOUND', 'SECURITY_SETTINGS', 'DATA_PRIVACY', 'SETUP_WIZARD'].includes(currentView) && !['TERMS', 'PRIVACY', 'CONTACT', 'ABOUT', 'CAREERS', 'PRESS'].includes(currentView);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {isOffline && (
         <div className="bg-slate-900 text-white text-xs font-bold py-2 text-center fixed top-0 left-0 right-0 z-[100] flex items-center justify-center gap-2 animate-slide-up">
-           <WifiOff size={14} /> You are offline. Some features may be unavailable.
+           <WifiOff size={14} /> You are offline.
         </div>
       )}
 
       {showSidebar && (
         <Navigation 
           currentView={currentView === 'MY_ORDERS' || currentView === 'PUBLIC_PROFILE' || currentView === 'ORDER_DETAIL' || currentView === 'NOTIFICATIONS' || currentView === 'SELLER_DASHBOARD' ? 'PROFILE' : currentView} 
-          setView={handleViewChange} 
+          setView={changeView} 
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
           userRole={userProfile.role}
         />
       )}
       
-      <main className={`transition-all duration-300 ease-in-out ${showSidebar && isSidebarOpen ? 'md:pl-64' : ''} ${isOffline ? 'pt-8' : ''}`}>
+      <main className={`transition-all duration-300 ease-in-out ${showSidebar && isSidebarOpen ? 'md:pl-64' : ''}`}>
         {renderView()}
       </main>
 
-      {showTour && !maintenanceMode && <OnboardingTour onComplete={handleTourComplete} />}
+      {userProfile && !maintenanceMode && <VoiceCommander onNavigate={changeView} onSearch={handleSearch} onLogout={signOut} />}
+      {showWizard && <SetupWizardView onComplete={handleWizardComplete} user={userProfile} />}
+      {showTour && !showWizard && <OnboardingTour onComplete={handleTourComplete} />}
     </div>
   );
 };

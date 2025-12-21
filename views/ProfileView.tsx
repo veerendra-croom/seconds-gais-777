@@ -473,7 +473,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
                           </div>
                           <ChevronRight size={14} className="text-slate-300 group-hover:text-primary-500" />
                        </button>
-                       
+                       {/* Activity Log Link */}
+                       <button 
+                         onClick={() => onNavigate && onNavigate('ACTIVITY_LOG')}
+                         className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors group"
+                       >
+                          <div className="flex items-center gap-3">
+                             <div className="p-2 bg-slate-50 rounded-xl text-slate-500 group-hover:bg-white group-hover:shadow-sm transition-all">
+                                <Shield size={18} />
+                             </div>
+                             <span className="font-bold text-sm text-slate-700">Security Log</span>
+                          </div>
+                          <ChevronRight size={14} className="text-slate-300 group-hover:text-primary-500" />
+                       </button>
                      </>
                    )}
                 </div>
@@ -530,15 +542,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user: initialUser, onE
         <>
           <EditProfileModal isOpen={showEditProfile} onClose={() => setShowEditProfile(false)} user={user} onUpdate={refreshProfile} />
           <WalletModal isOpen={showWallet} onClose={() => setShowWallet(false)} user={user} onUpdate={refreshProfile} />
-          <SettingsModal 
-            isOpen={showSettings} 
-            onClose={() => setShowSettings(false)} 
-            userEmail={user.email} 
-            onNavigate={(view) => {
-               setShowSettings(false);
-               if (onNavigate) onNavigate(view as ModuleType);
-            }}
-          />
+          <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} userEmail={user.email} />
           <ReferralModal isOpen={showReferral} onClose={() => setShowReferral(false)} user={user} />
           <ReviewModal 
             isOpen={!!reviewTarget} 

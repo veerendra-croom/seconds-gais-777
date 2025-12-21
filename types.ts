@@ -1,5 +1,5 @@
 
-export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'COMMUNITY' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'ORDER_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'NOTIFICATIONS' | 'QR_SCANNER' | 'SELLER_DASHBOARD' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS' | 'HELP_CENTER' | 'ACTIVITY_LOG' | 'NOT_FOUND' | 'SECURITY_SETTINGS' | 'DATA_PRIVACY' | 'SETUP_WIZARD';
+export type ModuleType = 'HOME' | 'BUY' | 'SELL' | 'RENT' | 'SHARE' | 'SWAP' | 'EARN' | 'REQUEST' | 'COMMUNITY' | 'PROFILE' | 'PUBLIC_PROFILE' | 'ITEM_DETAIL' | 'ORDER_DETAIL' | 'CHAT_LIST' | 'CHAT_ROOM' | 'NOTIFICATIONS' | 'QR_SCANNER' | 'SELLER_DASHBOARD' | 'LANDING' | 'AUTH' | 'COLLEGE_LINK' | 'ADMIN_DASHBOARD' | 'MY_ORDERS' | 'TERMS' | 'PRIVACY' | 'SAFETY' | 'CONTACT' | 'ABOUT' | 'CAREERS' | 'PRESS' | 'HELP_CENTER' | 'ACTIVITY_LOG' | 'NOT_FOUND';
 
 export enum Category {
   ELECTRONICS = 'Electronics',
@@ -47,6 +47,7 @@ export interface Item {
   verified: boolean;
   status: 'ACTIVE' | 'SOLD' | 'DRAFT' | 'ARCHIVED';
   views?: number;
+  tags?: string[];
   
   // Auction specific
   auctionEndsAt?: string;
@@ -79,10 +80,6 @@ export interface UserProfile {
   trustedContacts?: string[]; // List of emails
   referralCode?: string;
   referralsCount?: number;
-  preferences?: {
-    interestedCategories?: string[];
-    primaryGoal?: 'BUY' | 'SELL' | 'BOTH';
-  };
 }
 
 export interface Badge {

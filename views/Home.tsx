@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { ModuleType, Item, UserProfile, AppNotification } from '../types';
-import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone, BellRing, ChevronLeft } from 'lucide-react';
+import { ShoppingCart, Tag, Clock, Users, Repeat, Briefcase, HandHeart, Search, Bell, Sparkles, X, Camera, Loader2, History, ChevronRight, Mic, MicOff, Download, Smartphone, BellRing, ChevronLeft, ScanLine } from 'lucide-react';
 import { api } from '../services/api';
 import { ItemCard } from '../components/ItemCard';
 import { analyzeImageForSearch } from '../services/geminiService';
@@ -379,6 +379,28 @@ export const Home: React.FC<HomeProps> = ({ user, onModuleSelect, onItemClick, o
           </div>
         )}
       </header>
+
+      {/* Snap & List Shortcut Banner */}
+      <div className="px-6 mb-6">
+         <button 
+           onClick={() => onModuleSelect('SELL')}
+           className="w-full bg-slate-900 rounded-[28px] p-1 flex items-center shadow-xl shadow-slate-900/10 group overflow-hidden relative"
+         >
+            <div className="absolute inset-0 bg-gradient-to-r from-primary-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div className="w-14 h-14 bg-white rounded-[24px] flex items-center justify-center text-slate-900 shrink-0 shadow-lg relative z-10">
+               <ScanLine size={28} className="group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="flex-1 text-left pl-4 py-2 relative z-10">
+               <p className="text-white font-black text-sm">Snap & List</p>
+               <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">AI Powered Listing</p>
+            </div>
+            <div className="pr-6 relative z-10">
+               <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white group-hover:translate-x-1 transition-transform">
+                  <ChevronRight size={18} />
+               </div>
+            </div>
+         </button>
+      </div>
 
       {/* Holographic Stats Card - Clickable now */}
       <div className="px-6 py-2 animate-slide-up">
